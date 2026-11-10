@@ -3,6 +3,7 @@ import {
   fetchRepairOrderDetail,
   fetchVehicleHistory,
   getOrCreateInspection,
+  setRepairOrderWorkCompleted,
   updateRepairOrderFields,
   updateRepairOrderStatus,
   type RepairOrderDetail,
@@ -45,6 +46,7 @@ export function RepairOrderDetailPage({
   const [tab, setTab] = useState<DetailTab>('overview')
   const [status, setStatus] = useState<RepairOrderStatus>('estimate')
   const [savingStatus, setSavingStatus] = useState(false)
+  const [savingWorkComplete, setSavingWorkComplete] = useState(false)
 
   const [odometer, setOdometer] = useState('')
   const [savingOdometer, setSavingOdometer] = useState(false)
@@ -114,6 +116,23 @@ export function RepairOrderDetailPage({
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSavingStatus(false)
+    }
+  }
+
+  async function handleToggleWorkComplete() {
+    if (!detail) return
+    setError(null)
+    setSavingWorkComplete(true)
+    try {
+      await setRepairOrderWorkCompleted(
+        detail.repairOrder.id,
+        detail.repairOrder.technician_completed_at === null,
+      )
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingWorkComplete(false)
     }
   }
 
@@ -288,6 +307,24 @@ export function RepairOrderDetailPage({
                 disabled={savingStatus || status === ro.status}
               >
                 {savingStatus ? 'Updating…' : 'Update status'}
+              </PrimaryButton>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-slate-300">
+                Work:{' '}
+                {ro.technician_completed_at
+                  ? `Completed ${formatDate(ro.technician_completed_at)}`
+                  : 'In progress'}
+              </span>
+              <PrimaryButton
+                onClick={() => void handleToggleWorkComplete()}
+                disabled={savingWorkComplete}
+              >
+                {savingWorkComplete
+                  ? 'Updating…'
+                  : ro.technician_completed_at
+                    ? 'Reopen work'
+                    : 'Mark work complete'}
               </PrimaryButton>
             </div>
 

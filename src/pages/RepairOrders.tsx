@@ -9,10 +9,9 @@ import {
 import { formatDate, vehicleLabel } from '../lib/format'
 import type { Customer, RepairOrder, Vehicle } from '../lib/types'
 import {
-  ASSIGNED_RO_STATUSES,
-  COMPLETED_RO_STATUSES,
   REPAIR_ORDER_PRIORITIES,
   REPAIR_ORDER_PRIORITY_LABELS,
+  isRepairOrderWorkComplete,
   type InspectionCounts,
   type RepairOrderPriority,
 } from '../lib/types'
@@ -90,10 +89,10 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
   }, [])
 
   const visibleOrders = useMemo(() => {
-    const statuses = tab === 'assigned' ? ASSIGNED_RO_STATUSES : COMPLETED_RO_STATUSES
     const q = search.trim().toLowerCase()
     const filtered = orders.filter((ro) => {
-      if (!statuses.includes(ro.status)) return false
+      const isComplete = isRepairOrderWorkComplete(ro)
+      if (tab === 'assigned' ? isComplete : !isComplete) return false
       if (!q) return true
       const haystack = [
         ro.ro_number,
@@ -112,10 +111,8 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
     })
   }, [orders, tab, search, sort])
 
-  const assignedCount = orders.filter((ro) => ASSIGNED_RO_STATUSES.includes(ro.status)).length
-  const completedCount = orders.filter((ro) =>
-    COMPLETED_RO_STATUSES.includes(ro.status),
-  ).length
+  const assignedCount = orders.filter((ro) => !isRepairOrderWorkComplete(ro)).length
+  const completedCount = orders.filter((ro) => isRepairOrderWorkComplete(ro)).length
 
   async function handleCustomerChange(id: string) {
     setCustomerId(id)
@@ -341,7 +338,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
           message={
             tab === 'assigned'
               ? 'No assigned orders match. Create a repair order to get started.'
-              : 'No completed orders yet. Orders move here when they reach Invoice status.'
+              : 'No completed orders yet. Orders move here when their work is marked complete.'
           }
         />
       ) : (

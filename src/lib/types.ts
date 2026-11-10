@@ -39,19 +39,19 @@ export const REPAIR_ORDER_STATUSES: RepairOrderStatus[] = [
 ]
 
 /**
- * Orders list tabs (reference spec): Assigned = everything still
- * being worked on; Completed = 'invoice' (job done and billed).
- * This split is an assumption — the screenshots show the tabs but
- * not the exact rule — and should be confirmed against the real app.
+ * Orders list tabs split on technician completion, NOT on order
+ * status. Assigned = work not yet marked complete
+ * (technician_completed_at is null); Completed = work marked
+ * complete (technician_completed_at is set). In the reference
+ * app the Completed tab holds orders with statuses like
+ * "Waiting For Approval" and "Waiting For Parts", and the
+ * Assigned tab holds "Waiting For Approval" too — no status
+ * rule reproduces the tabs. Completion is a per-order
+ * technician state, separate from the status workflow.
  */
-export const ASSIGNED_RO_STATUSES: RepairOrderStatus[] = [
-  'estimate',
-  'waiting_for_approval',
-  'waiting_for_parts',
-  'appointment_confirmed',
-]
-
-export const COMPLETED_RO_STATUSES: RepairOrderStatus[] = ['invoice']
+export function isRepairOrderWorkComplete(ro: RepairOrder): boolean {
+  return ro.technician_completed_at !== null
+}
 
 export const REPAIR_ORDER_STATUS_LABELS: Record<RepairOrderStatus, string> = {
   estimate: 'Estimate',
@@ -121,6 +121,8 @@ export interface RepairOrder {
   labor_hours: number
   labor_rate: number
   parts_total: number
+  /** Null while the work is in progress; set when the technician marks the work complete. Drives the Assigned/Completed tabs. */
+  technician_completed_at: string | null
   shop_notes: string | null
   customer_recommendations: string | null
   created_at: string

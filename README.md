@@ -20,9 +20,10 @@ dark slate/blue design.)
   only. Additive only, no secrets.
 - Order statuses from the reference app: Estimate, Waiting For
   Approval, Waiting For Parts, Appointment Confirmed, Invoice.
-  Orders list tabs: Assigned (everything except Invoice) / Completed
-  (Invoice) — that split is an assumption from the screenshots and
-  should be confirmed against the real app.
+  Orders list tabs split on technician completion, not status:
+  Assigned = work not yet marked complete, Completed = work
+  marked complete (a "Mark work complete" / "Reopen work" control
+  on the order page sets `repair_orders.technician_completed_at`).
 - Comprehensive Inspection: 56 items in 7 sections, each marked
   good / attention / failed (unmarked = no result row), with counts
   by state and a "Mark as complete" action. The checklist is

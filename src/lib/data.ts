@@ -17,7 +17,6 @@ import type {
   RepairOrderStatus,
   Vehicle,
 } from './types'
-import { ASSIGNED_RO_STATUSES } from './types'
 
 function throwIfError(error: { message: string } | null, what: string): void {
   if (error) throw new Error(`${what}: ${error.message}`)
@@ -34,7 +33,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     client
       .from('repair_orders')
       .select('id', { count: 'exact', head: true })
-      .in('status', ASSIGNED_RO_STATUSES),
+      .is('technician_completed_at', null),
     client.from('invoices').select('total').eq('status', 'paid'),
     client.from('repair_orders').select('labor_hours'),
     client
@@ -119,7 +118,7 @@ export async function fetchActiveRepairOrders(): Promise<RepairOrder[]> {
   const { data, error } = await client
     .from('repair_orders')
     .select(RO_SELECT)
-    .in('status', ASSIGNED_RO_STATUSES)
+    .is('technician_completed_at', null)
     .order('created_at', { ascending: true })
   throwIfError(error, 'Failed to load active repair orders')
   return (data ?? []) as RepairOrder[]
@@ -222,6 +221,27 @@ export async function updateRepairOrderStatus(
   const client = requireClient()
   const { error } = await client.from('repair_orders').update({ status }).eq('id', id)
   throwIfError(error, 'Failed to update repair order status')
+}
+
+/**
+ * Mark an order's work complete (completed = true) or reopen it
+ * (completed = false, clears the timestamp). This is the
+ * technician-completion state that drives the Assigned/Completed
+ * tabs — separate from the order status workflow; it does not
+ * change the order's status.
+ */
+export async function setRepairOrderWorkCompleted(
+  id: string,
+  completed: boolean,
+): Promise<void> {
+  const client = requireClient()
+  const { error } = await client
+    .from('repair_orders')
+    .update({
+      technician_completed_at: completed ? new Date().toISOString() : null,
+    })
+    .eq('id', id)
+  throwIfError(error, 'Failed to update work completion')
 }
 
 export interface RepairOrderFieldUpdates {
