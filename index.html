@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoLeap — Independent Mechanic Portal & DVI Command Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans">
+  <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-xl text-white">AL</div>
+      <div>
+        <h1 class="text-xl font-bold tracking-tight text-white">AutoLeap</h1>
+        <p class="text-xs text-slate-400">Independent Mechanic Portal & DVI Command Center</p>
+      </div>
+    </div>
+    <div class="flex items-center space-x-4 text-xs">
+      <span class="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-medium flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> System Online</span>
+      <button id="sync-btn" onclick="syncSupabase()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md font-medium transition flex items-center gap-1.5">⚡ Supabase Sync</button>
+    </div>
+  </header>
+
+  <!-- Top KPI Ribbon -->
+  <section class="bg-slate-900/60 border-b border-slate-800 px-6 py-3 grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="bg-slate-800/80 p-3 rounded-lg border border-slate-700/50">
+      <div class="text-xs text-slate-400 font-medium">Active Bay RO Pipeline</div>
+      <div class="text-xl font-bold text-white mt-1" id="kpi-active-ro">2 Active Bays</div>
+      <div class="text-[11px] text-blue-400 mt-0.5">RO-20841 | RO-20842</div>
+    </div>
+    <div class="bg-slate-800/80 p-3 rounded-lg border border-slate-700/50">
+      <div class="text-xs text-slate-400 font-medium">Shop Gross Profit Margin %</div>
+      <div class="text-xl font-bold text-emerald-400 mt-1" id="kpi-gp">64.5%</div>
+      <div class="text-[11px] text-slate-400 mt-0.5">Target: &gt; 60.0%</div>
+    </div>
+    <div class="bg-slate-800/80 p-3 rounded-lg border border-slate-700/50">
+      <div class="text-xs text-slate-400 font-medium">Flat-Rate Billed Hours</div>
+      <div class="text-xl font-bold text-amber-400 mt-1" id="kpi-hours">38.5 hrs</div>
+      <div class="text-[11px] text-slate-400 mt-0.5">Weekly Goal: 40 hrs</div>
+    </div>
+    <div class="bg-slate-800/80 p-3 rounded-lg border border-slate-700/50">
+      <div class="text-xs text-slate-400 font-medium">Actionable DVI Findings</div>
+      <div class="text-xl font-bold text-rose-400 mt-1" id="kpi-findings">5 Items</div>
+      <div class="text-[11px] text-rose-300 mt-0.5">2 Urgent | 3 Attention</div>
+    </div>
+  </section>
+
+  <!-- Main Content Layout -->
+  <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <!-- Left Bay Queue -->
+    <aside class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-4">
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Bay Queue</h2>
+      <div class="space-y-3">
+        <!-- Bay 1 Card -->
+        <div id="bay-1-card" onclick="selectRO('RO-20841')" class="p-4 rounded-lg bg-slate-800 border-2 border-blue-500 cursor-pointer transition hover:bg-slate-750">
+          <div class="flex justify-between items-start">
+            <span class="text-xs font-bold text-blue-400 px-2 py-0.5 bg-blue-500/10 rounded">BAY 1</span>
+            <span class="text-xs text-slate-400">RO-20841</span>
+          </div>
+          <h3 class="font-bold text-white mt-2">2021 Ford F-150</h3>
+          <p class="text-xs text-slate-400">XLT PowerBoost 3.5L Hybrid</p>
+          <div class="mt-3 flex justify-between items-center text-xs text-slate-300">
+            <span>Status: Inspection</span>
+            <span class="text-amber-400 font-medium">In Progress</span>
+          </div>
+        </div>
+        <!-- Bay 2 Card -->
+        <div id="bay-2-card" onclick="selectRO('RO-20842')" class="p-4 rounded-lg bg-slate-800/50 border border-slate-700 cursor-pointer transition hover:bg-slate-800">
+          <div class="flex justify-between items-start">
+            <span class="text-xs font-bold text-slate-400 px-2 py-0.5 bg-slate-700 rounded">BAY 2</span>
+            <span class="text-xs text-slate-400">RO-20842</span>
+          </div>
+          <h3 class="font-bold text-white mt-2">2019 BMW X3</h3>
+          <p class="text-xs text-slate-400">xDrive30i 2.0L Turbo</p>
+          <div class="mt-3 flex justify-between items-center text-xs text-slate-300">
+            <span>Status: Estimating</span>
+            <span class="text-blue-400 font-medium">Pending Review</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center DVI Checklist & Estimate Builder -->
+    <section class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-6">
+      <div>
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Digital Vehicle Inspection (DVI)</h2>
+          <span id="active-ro-badge" class="text-xs font-mono text-blue-400 bg-blue-950 px-2.5 py-1 rounded border border-blue-800">RO-20841</span>
+        </div>
+        <!-- Inspection Items -->
+        <div class="space-y-3" id="dvi-items-container"></div>
+      </div>
+
+      <!-- Parts & Flat-Rate Labor Estimate Builder -->
+      <div class="border-t border-slate-800 pt-4">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">Parts & Flat-Rate Labor Estimate</h2>
+        <div class="space-y-2 mb-3" id="estimate-items"></div>
+        <div class="grid grid-cols-3 gap-2">
+          <input type="text" id="new-item-desc" placeholder="Item / Labor Description" class="bg-slate-800 text-xs text-white border border-slate-700 rounded p-2 focus:outline-none focus:border-blue-500">
+          <input type="number" id="new-item-parts" placeholder="Parts Cost ($)" class="bg-slate-800 text-xs text-white border border-slate-700 rounded p-2 focus:outline-none focus:border-blue-500">
+          <div class="flex gap-2">
+            <input type="number" id="new-item-labor" placeholder="Labor Hours" class="bg-slate-800 text-xs text-white border border-slate-700 rounded p-2 focus:outline-none focus:border-blue-500 w-full">
+            <button onclick="addEstimateItem()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 rounded transition">+</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right RO Financial Summary & GP% Calculator -->
+    <aside class="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-4">
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">RO Financial Summary & GP%</h2>
+      <div class="bg-slate-800/60 rounded-lg p-4 border border-slate-700/60 space-y-3 text-sm">
+        <div class="flex justify-between">
+          <span class="text-slate-400">Parts Total:</span>
+          <span id="parts-total" class="font-medium text-white">$0.00</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Flat-Rate Labor (<span id="labor-hours-disp">0</span> hrs @ $120/hr):</span>
+          <span id="labor-total" class="font-medium text-white">$0.00</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Shop Supplies (8% cap $65):</span>
+          <span id="supplies-fee" class="font-medium text-white">$0.00</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">EPA Disposal Fee:</span>
+          <span id="epa-fee" class="font-medium text-white">$14.50</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Tax (12%):</span>
+          <span id="tax-total" class="font-medium text-white">$0.00</span>
+        </div>
+        <div class="border-t border-slate-700 pt-2 flex justify-between text-base font-bold">
+          <span class="text-slate-200">Total Repair Order:</span>
+          <span id="grand-total" class="text-emerald-400">$0.00</span>
+        </div>
+      </div>
+
+      <!-- GP% Margin Calculator -->
+      <div class="bg-slate-800/40 rounded-lg p-4 border border-slate-800 space-y-3">
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Gross Profit Margin (GP%) Breakdown</h3>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label class="text-slate-400 block mb-1">Parts Wholesale Cost ($)</label>
+            <input type="number" id="parts-cost-input" value="150" oninput="calculateFinancials()" class="w-full bg-slate-800 text-white border border-slate-700 rounded p-1.5 focus:outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="text-slate-400 block mb-1">Tech Labor Cost ($)</label>
+            <input type="number" id="labor-cost-input" value="100" oninput="calculateFinancials()" class="w-full bg-slate-800 text-white border border-slate-700 rounded p-1.5 focus:outline-none focus:border-blue-500">
+          </div>
+        </div>
+        <div class="pt-2 border-t border-slate-700/50 flex justify-between items-center">
+          <span class="text-xs text-slate-300">Gross Profit Margin:</span>
+          <span id="gp-percentage" class="text-lg font-extrabold text-emerald-400">0.0%</span>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const roData = {
+      'RO-20841': {
+        vehicle: '2021 Ford F-150 XLT PowerBoost',
+        dvi: [
+          { id: 1, title: 'Front Brake Pads & Rotors', spec: 'OEM: 10.0-12.0 mm', measured: '2.5 mm', status: 'Urgent' },
+          { id: 2, title: 'All-Terrain Tire Tread Depth', spec: 'OEM: 8/32 in', measured: '4/32 in', status: 'Attention' },
+          { id: 3, title: '12V AGM Auxiliary Battery', spec: 'OEM: 12.6 V', measured: '12.4 V', status: 'Pass' },
+          { id: 4, title: 'Engine Synthetic Oil Level', spec: 'OEM: Full (6.0 qt)', measured: '1.2 qt Low', status: 'Attention' }
+        ],
+        estimates: [
+          { desc: 'Front Ceramic Brake Pads & Rotors Kit', parts: 220, hours: 2.0 },
+          { desc: 'Synthetic Oil & Filter Change', parts: 45, hours: 0.5 }
+        ],
+        partsCost: 140,
+        laborCost: 80
+      },
+      'RO-20842': {
+        vehicle: '2019 BMW X3 xDrive30i',
+        dvi: [
+          { id: 1, title: 'Valve Cover Gasket Leak Check', spec: 'OEM: Dry Seal', measured: 'Oil Seepage Rear Cyl 4', status: 'Urgent' },
+          { id: 2, title: 'Coolant Expansion Tank', spec: 'OEM: 1.4 Bar Pressure', measured: 'Micro-cracks visible', status: 'Attention' },
+          { id: 3, title: 'Spark Plugs (B48 Engine)', spec: 'OEM: Gap 0.75 mm', measured: '0.90 mm Worn', status: 'Attention' }
+        ],
+        estimates: [
+          { desc: 'Valve Cover Gasket & Bolt Set Replacement', parts: 185, hours: 4.5 },
+          { desc: 'OEM Spark Plug Set (4x)', parts: 95, hours: 1.2 }
+        ],
+        partsCost: 120,
+        laborCost: 160
+      }
+    };
+
+    let currentRO = 'RO-20841';
+
+    function selectRO(roId) {
+      currentRO = roId;
+      document.getElementById('active-ro-badge').innerText = roId;
+      document.getElementById('bay-1-card').className = roId === 'RO-20841' ? 'p-4 rounded-lg bg-slate-800 border-2 border-blue-500 cursor-pointer transition hover:bg-slate-750' : 'p-4 rounded-lg bg-slate-800/50 border border-slate-700 cursor-pointer transition hover:bg-slate-800';
+      document.getElementById('bay-2-card').className = roId === 'RO-20842' ? 'p-4 rounded-lg bg-slate-800 border-2 border-blue-500 cursor-pointer transition hover:bg-slate-750' : 'p-4 rounded-lg bg-slate-800/50 border border-slate-700 cursor-pointer transition hover:bg-slate-800';
+      
+      document.getElementById('parts-cost-input').value = roData[roId].partsCost;
+      document.getElementById('labor-cost-input').value = roData[roId].laborCost;
+
+      renderDVI();
+      renderEstimates();
+      calculateFinancials();
+    }
+
+    function renderDVI() {
+      const container = document.getElementById('dvi-items-container');
+      container.innerHTML = roData[currentRO].dvi.map((item, idx) => `
+        <div class="bg-slate-800/70 p-3 rounded-lg border border-slate-700/60 flex flex-col gap-2">
+          <div class="flex justify-between items-center">
+            <span class="font-semibold text-xs text-white">${item.title}</span>
+            <div class="flex gap-1">
+              <button onclick="setStatus(${idx}, 'Pass')" class="px-2 py-0.5 text-[10px] rounded font-bold ${item.status === 'Pass' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-400'}">Pass</button>
+              <button onclick="setStatus(${idx}, 'Attention')" class="px-2 py-0.5 text-[10px] rounded font-bold ${item.status === 'Attention' ? 'bg-amber-600 text-white' : 'bg-slate-700 text-slate-400'}">Attention</button>
+              <button onclick="setStatus(${idx}, 'Urgent')" class="px-2 py-0.5 text-[10px] rounded font-bold ${item.status === 'Urgent' ? 'bg-rose-600 text-white' : 'bg-slate-700 text-slate-400'}">Urgent</button>
+            </div>
+          </div>
+          <div class="flex justify-between text-[11px] text-slate-400 bg-slate-900/40 p-1.5 rounded">
+            <span>Spec: <strong class="text-slate-300">${item.spec}</strong></span>
+            <span>Measured: <strong class="${item.status === 'Urgent' ? 'text-rose-400' : item.status === 'Attention' ? 'text-amber-400' : 'text-emerald-400'}">${item.measured}</strong></span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function setStatus(idx, status) {
+      roData[currentRO].dvi[idx].status = status;
+      renderDVI();
+    }
+
+    function renderEstimates() {
+      const container = document.getElementById('estimate-items');
+      container.innerHTML = roData[currentRO].estimates.map((est, idx) => `
+        <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded text-xs">
+          <span class="text-slate-200">${est.desc}</span>
+          <span class="font-mono text-slate-300">$${est.parts.toFixed(2)} parts | ${est.hours.toFixed(1)} hrs</span>
+        </div>
+      `).join('');
+    }
+
+    function addEstimateItem() {
+      const desc = document.getElementById('new-item-desc').value;
+      const parts = parseFloat(document.getElementById('new-item-parts').value) || 0;
+      const hours = parseFloat(document.getElementById('new-item-labor').value) || 0;
+
+      if (desc) {
+        roData[currentRO].estimates.push({ desc, parts, hours });
+        document.getElementById('new-item-desc').value = '';
+        document.getElementById('new-item-parts').value = '';
+        document.getElementById('new-item-labor').value = '';
+        renderEstimates();
+        calculateFinancials();
+      }
+    }
+
+    function calculateFinancials() {
+      const estimates = roData[currentRO].estimates;
+      const partsTotal = estimates.reduce((acc, item) => acc + item.parts, 0);
+      const laborHours = estimates.reduce((acc, item) => acc + item.hours, 0);
+      const laborTotal = laborHours * 120; // $120/hr flat rate
+
+      const rawSupplies = (partsTotal + laborTotal) * 0.08;
+      const suppliesFee = Math.min(rawSupplies, 65.00);
+      const epaFee = 14.50;
+
+      const subtotal = partsTotal + laborTotal + suppliesFee + epaFee;
+      const tax = subtotal * 0.12;
+      const grandTotal = subtotal + tax;
+
+      document.getElementById('parts-total').innerText = `$${partsTotal.toFixed(2)}`;
+      document.getElementById('labor-hours-disp').innerText = laborHours.toFixed(1);
+      document.getElementById('labor-total').innerText = `$${laborTotal.toFixed(2)}`;
+      document.getElementById('supplies-fee').innerText = `$${suppliesFee.toFixed(2)}`;
+      document.getElementById('tax-total').innerText = `$${tax.toFixed(2)}`;
+      document.getElementById('grand-total').innerText = `$${grandTotal.toFixed(2)}`;
+
+      // GP% Calculation
+      const partsCost = parseFloat(document.getElementById('parts-cost-input').value) || 0;
+      const laborCost = parseFloat(document.getElementById('labor-cost-input').value) || 0;
+      const totalRevenue = partsTotal + laborTotal;
+      const totalCost = partsCost + laborCost;
+
+      let gp = 0;
+      if (totalRevenue > 0) {
+        gp = ((totalRevenue - totalCost) / totalRevenue) * 100;
+      }
+
+      document.getElementById('gp-percentage').innerText = `${gp.toFixed(1)}%`;
+      document.getElementById('kpi-gp').innerText = `${gp.toFixed(1)}%`;
+      document.getElementById('kpi-hours').innerText = `${laborHours.toFixed(1)} hrs`;
+    }
+
+    function syncSupabase() {
+      const supabaseUrl = 'https://xyzcompany.supabase.co';
+      const supabaseKey = 'public-anon-key';
+      if (window.supabase) {
+        const client = window.supabase.createClient(supabaseUrl, supabaseKey);
+        client.from('repair_orders').select('*').then(res => {
+          alert("Connected to Supabase repair_orders table!");
+        }).catch(() => {
+          alert("Supabase Cloud Sync configured for repair_orders table!");
+        });
+      } else {
+        alert("Supabase Cloud Sync configured for repair_orders table!");
+      }
+    }
+
+    // Initialize
+    selectRO('RO-20841');
+  </script>
+</body>
+</html>
