@@ -4,6 +4,7 @@ import {
   fetchCustomerList,
   fetchInspectionCountsByRepairOrder,
   fetchRepairOrders,
+  fetchServiceCountsByRepairOrder,
   fetchVehiclesForCustomer,
 } from '../lib/data'
 import { formatDate, vehicleLabel } from '../lib/format'
@@ -14,6 +15,7 @@ import {
   isRepairOrderWorkComplete,
   type InspectionCounts,
   type RepairOrderPriority,
+  type ServiceCounts,
 } from '../lib/types'
 import {
   Card,
@@ -35,6 +37,9 @@ type Sort = 'oldest' | 'newest'
 export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void }) {
   const [orders, setOrders] = useState<RepairOrder[]>([])
   const [countsByRo, setCountsByRo] = useState<Record<string, InspectionCounts>>({})
+  const [serviceCountsByRo, setServiceCountsByRo] = useState<Record<string, ServiceCounts>>(
+    {},
+  )
   const [customers, setCustomers] = useState<Customer[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -73,9 +78,15 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
         if (cancelled) return
         setOrders(ros)
         setCustomers(list)
-        // Inspection progress per order (marked / total items).
-        const counts = await fetchInspectionCountsByRepairOrder()
-        if (!cancelled) setCountsByRo(counts)
+        // Inspection progress per order (marked / total items) and
+        // service progress per order (done / total services).
+        const [counts, serviceCounts] = await Promise.all([
+          fetchInspectionCountsByRepairOrder(),
+          fetchServiceCountsByRepairOrder(),
+        ])
+        if (cancelled) return
+        setCountsByRo(counts)
+        setServiceCountsByRo(serviceCounts)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -346,6 +357,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
           {visibleOrders.map((ro) => {
             const counts = countsByRo[ro.id]
             const marked = counts ? counts.total - counts.unmarked : 0
+            const serviceCounts = serviceCountsByRo[ro.id]
             return (
               <button
                 key={ro.id}
@@ -374,7 +386,15 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                     {ro.bay ? ` · ${ro.bay}` : ''}
                   </span>
                 </div>
-                <div className="mt-3 border-t border-slate-800 pt-3">
+                <div className="mt-3 flex flex-col gap-1.5 border-t border-slate-800 pt-3">
+                  {serviceCounts && serviceCounts.total > 0 ? (
+                    <span className="text-xs text-slate-300">
+                      <span aria-hidden="true">🔧</span> Services {serviceCounts.done}/
+                      {serviceCounts.total}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">No services yet</span>
+                  )}
                   {counts ? (
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs text-slate-300">

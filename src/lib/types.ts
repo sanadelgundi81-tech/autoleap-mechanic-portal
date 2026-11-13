@@ -238,6 +238,29 @@ export interface InspectionSummary {
   counts: InspectionCounts | null
 }
 
+/** A service (line item) on a repair order. Mirrors
+ *  supabase/migrations/20261113010000_order_services.sql. */
+export interface OrderService {
+  id: string
+  repair_order_id: string
+  name: string
+  description: string | null
+  labor_hours: number
+  labor_rate: number
+  parts_total: number
+  /** The wrench counter counts done services vs total. */
+  is_done: boolean
+  position: number
+  created_at: string
+  updated_at: string
+}
+
+/** Service progress for one order: done services / total services. */
+export interface ServiceCounts {
+  total: number
+  done: number
+}
+
 export interface CustomerWithVehicles extends Customer {
   vehicles: Vehicle[]
 }
