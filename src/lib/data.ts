@@ -12,9 +12,11 @@ import type {
   InspectionTemplate,
   InspectionTemplateItem,
   Invoice,
+  OrderService,
   RepairOrder,
   RepairOrderPriority,
   RepairOrderStatus,
+  ServiceCounts,
   Vehicle,
 } from './types'
 
@@ -144,11 +146,12 @@ export interface RepairOrderDetail {
   estimates: Estimate[]
   invoices: Invoice[]
   inspectionSummary: InspectionSummary
+  services: OrderService[]
 }
 
 export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDetail> {
   const client = requireClient()
-  const [ro, estimates, invoices, inspection] = await Promise.all([
+  const [ro, estimates, invoices, inspection, services] = await Promise.all([
     client.from('repair_orders').select(RO_SELECT).eq('id', id).single(),
     client
       .from('estimates')
@@ -167,6 +170,7 @@ export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDet
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle(),
+    fetchOrderServices(id),
   ])
 
   throwIfError(ro.error, 'Failed to load repair order')
@@ -188,6 +192,7 @@ export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDet
     estimates: (estimates.data ?? []) as Estimate[],
     invoices: (invoices.data ?? []) as Invoice[],
     inspectionSummary,
+    services,
   }
 }
 
@@ -258,6 +263,92 @@ export async function updateRepairOrderFields(
   const client = requireClient()
   const { error } = await client.from('repair_orders').update(updates).eq('id', id)
   throwIfError(error, 'Failed to update repair order')
+}
+
+// ---------- Order services ----------
+
+export async function fetchOrderServices(repairOrderId: string): Promise<OrderService[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('repair_order_services')
+    .select('*')
+    .eq('repair_order_id', repairOrderId)
+    .order('position', { ascending: true })
+    .order('created_at', { ascending: true })
+  throwIfError(error, 'Failed to load services')
+  return (data ?? []) as OrderService[]
+}
+
+export interface NewOrderServiceInput {
+  repair_order_id: string
+  name: string
+  description: string | null
+  labor_hours: number
+  labor_rate: number
+  parts_total: number
+}
+
+/** Adds a service at the end of the order's list (position = max + 1). */
+export async function createOrderService(input: NewOrderServiceInput): Promise<OrderService> {
+  const client = requireClient()
+  const { data: last, error: lastError } = await client
+    .from('repair_order_services')
+    .select('position')
+    .eq('repair_order_id', input.repair_order_id)
+    .order('position', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  throwIfError(lastError, 'Failed to load service positions')
+  const position = last ? (last as { position: number }).position + 1 : 0
+  const { data, error } = await client
+    .from('repair_order_services')
+    .insert({ ...input, position })
+    .select('*')
+    .single()
+  throwIfError(error, 'Failed to add service')
+  return data as OrderService
+}
+
+export interface OrderServiceUpdates {
+  name?: string
+  description?: string | null
+  labor_hours?: number
+  labor_rate?: number
+  parts_total?: number
+  is_done?: boolean
+}
+
+export async function updateOrderService(
+  id: string,
+  updates: OrderServiceUpdates,
+): Promise<void> {
+  const client = requireClient()
+  const { error } = await client.from('repair_order_services').update(updates).eq('id', id)
+  throwIfError(error, 'Failed to update service')
+}
+
+export async function deleteOrderService(id: string): Promise<void> {
+  const client = requireClient()
+  const { error } = await client.from('repair_order_services').delete().eq('id', id)
+  throwIfError(error, 'Failed to delete service')
+}
+
+/** Service progress (done / total) per repair order. Orders with no services are absent. */
+export async function fetchServiceCountsByRepairOrder(): Promise<
+  Record<string, ServiceCounts>
+> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('repair_order_services')
+    .select('repair_order_id, is_done')
+  throwIfError(error, 'Failed to load services')
+  const counts: Record<string, ServiceCounts> = {}
+  for (const row of (data ?? []) as { repair_order_id: string; is_done: boolean }[]) {
+    const entry = (counts[row.repair_order_id] ??= { total: 0, done: 0 })
+    entry.total += 1
+    if (row.is_done) entry.done += 1
+  }
+  return counts
 }
 
 // ---------- Inspections ----------

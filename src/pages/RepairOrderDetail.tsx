@@ -1,9 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
+  createOrderService,
+  deleteOrderService,
   fetchRepairOrderDetail,
   fetchVehicleHistory,
   getOrCreateInspection,
   setRepairOrderWorkCompleted,
+  updateOrderService,
   updateRepairOrderFields,
   updateRepairOrderStatus,
   type RepairOrderDetail,
@@ -12,6 +15,7 @@ import { formatDate, formatKm, money, vehicleLabel } from '../lib/format'
 import {
   REPAIR_ORDER_STATUSES,
   REPAIR_ORDER_STATUS_LABELS,
+  type OrderService,
   type RepairOrder,
   type RepairOrderStatus,
 } from '../lib/types'
@@ -218,7 +222,7 @@ export function RepairOrderDetailPage({
   if (loading) return <LoadingState message="Loading repair order…" />
   if (!detail) return <ErrorBanner message={error ?? 'Repair order not found.'} />
 
-  const { repairOrder: ro, estimates, invoices, inspectionSummary } = detail
+  const { repairOrder: ro, estimates, invoices, inspectionSummary, services } = detail
   const currentStep = REPAIR_ORDER_STATUSES.indexOf(ro.status)
   const vehicle = ro.vehicles
 
@@ -564,9 +568,12 @@ export function RepairOrderDetailPage({
             </div>
           </div>
         ) : (
-          <div className="mt-4">
-            <EmptyState message="Services arrive in Stage 2 — service line items, approvals, and service progress will live here." />
-          </div>
+          <ServicesTab
+            repairOrderId={ro.id}
+            services={services}
+            onChanged={load}
+            onError={setError}
+          />
         )}
       </Card>
 
@@ -614,6 +621,302 @@ export function RepairOrderDetailPage({
           )}
         </Card>
       </div>
+    </div>
+  )
+}
+
+// ---------- Services tab ----------
+
+interface ServiceFormValues {
+  name: string
+  description: string
+  laborHours: string
+  laborRate: string
+  partsTotal: string
+}
+
+const EMPTY_SERVICE_FORM: ServiceFormValues = {
+  name: '',
+  description: '',
+  laborHours: '0',
+  laborRate: '0',
+  partsTotal: '0',
+}
+
+function serviceToForm(service: OrderService): ServiceFormValues {
+  return {
+    name: service.name,
+    description: service.description ?? '',
+    laborHours: String(service.labor_hours),
+    laborRate: String(service.labor_rate),
+    partsTotal: String(service.parts_total),
+  }
+}
+
+function formToFields(values: ServiceFormValues) {
+  return {
+    name: values.name.trim(),
+    description: values.description.trim() === '' ? null : values.description.trim(),
+    labor_hours: Number(values.laborHours) || 0,
+    labor_rate: Number(values.laborRate) || 0,
+    parts_total: Number(values.partsTotal) || 0,
+  }
+}
+
+function serviceLabor(service: OrderService): number {
+  return Number(service.labor_hours) * Number(service.labor_rate)
+}
+
+function ServicesTab({
+  repairOrderId,
+  services,
+  onChanged,
+  onError,
+}: {
+  repairOrderId: string
+  services: OrderService[]
+  onChanged: () => Promise<void>
+  onError: (message: string | null) => void
+}) {
+  const [showAdd, setShowAdd] = useState(false)
+  const [addValues, setAddValues] = useState<ServiceFormValues>(EMPTY_SERVICE_FORM)
+  const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValues, setEditValues] = useState<ServiceFormValues>(EMPTY_SERVICE_FORM)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  const done = services.filter((s) => s.is_done).length
+  const laborTotal = services.reduce((sum, s) => sum + serviceLabor(s), 0)
+  const partsTotal = services.reduce((sum, s) => sum + Number(s.parts_total), 0)
+
+  /** Runs a change, then reloads the order detail so the counts update. */
+  async function run(id: string | null, action: () => Promise<void>): Promise<boolean> {
+    onError(null)
+    setBusyId(id)
+    try {
+      await action()
+      await onChanged()
+      return true
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+      return false
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function handleAdd(event: FormEvent) {
+    event.preventDefault()
+    if (addValues.name.trim() === '') return
+    setAdding(true)
+    const ok = await run(null, async () => {
+      await createOrderService({ repair_order_id: repairOrderId, ...formToFields(addValues) })
+    })
+    setAdding(false)
+    if (ok) {
+      setAddValues(EMPTY_SERVICE_FORM)
+      setShowAdd(false)
+    }
+  }
+
+  async function handleSaveEdit(event: FormEvent) {
+    event.preventDefault()
+    if (!editingId || editValues.name.trim() === '') return
+    const id = editingId
+    const ok = await run(id, () => updateOrderService(id, formToFields(editValues)))
+    if (ok) setEditingId(null)
+  }
+
+  function handleToggleDone(service: OrderService) {
+    void run(service.id, () => updateOrderService(service.id, { is_done: !service.is_done }))
+  }
+
+  function handleDelete(service: OrderService) {
+    if (!window.confirm(`Delete service "${service.name}"?`)) return
+    void run(service.id, () => deleteOrderService(service.id))
+  }
+
+  return (
+    <div className="mt-4 flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/60 p-4">
+        <div>
+          <p className="text-sm font-bold text-white">
+            <span aria-hidden="true">🔧</span> Services {done}/{services.length}
+          </p>
+          <p className="text-xs text-slate-400">
+            Labour {money(laborTotal)} · Parts {money(partsTotal)} · Total{' '}
+            {money(laborTotal + partsTotal)}
+          </p>
+        </div>
+        <PrimaryButton onClick={() => setShowAdd((v) => !v)}>
+          {showAdd ? 'Cancel' : 'Add service'}
+        </PrimaryButton>
+      </div>
+
+      {showAdd && (
+        <form
+          onSubmit={handleAdd}
+          className="rounded-lg border border-slate-700 bg-slate-800/60 p-4"
+        >
+          <ServiceFormFields values={addValues} onChange={setAddValues} />
+          <PrimaryButton
+            type="submit"
+            className="mt-3"
+            disabled={adding || addValues.name.trim() === ''}
+          >
+            {adding ? 'Adding…' : 'Save service'}
+          </PrimaryButton>
+        </form>
+      )}
+
+      {services.length === 0 ? (
+        <EmptyState message="No services on this order yet. Use Add service to add the first one." />
+      ) : (
+        <div className="space-y-2">
+          {services.map((service) =>
+            editingId === service.id ? (
+              <form
+                key={service.id}
+                onSubmit={handleSaveEdit}
+                className="rounded-lg border border-blue-500/50 bg-slate-800/60 p-4"
+              >
+                <ServiceFormFields values={editValues} onChange={setEditValues} />
+                <div className="mt-3 flex gap-2">
+                  <PrimaryButton
+                    type="submit"
+                    disabled={busyId === service.id || editValues.name.trim() === ''}
+                  >
+                    {busyId === service.id ? 'Saving…' : 'Save'}
+                  </PrimaryButton>
+                  <SecondaryButton onClick={() => setEditingId(null)}>Cancel</SecondaryButton>
+                </div>
+              </form>
+            ) : (
+              <div
+                key={service.id}
+                className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/60 p-4"
+              >
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`font-semibold ${
+                      service.is_done ? 'text-slate-400 line-through' : 'text-slate-100'
+                    }`}
+                  >
+                    {service.name}
+                  </p>
+                  {service.description && (
+                    <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-400">
+                      {service.description}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-slate-300">
+                    Labour {Number(service.labor_hours)} h × {money(Number(service.labor_rate))}{' '}
+                    = {money(serviceLabor(service))} · Parts{' '}
+                    {money(Number(service.parts_total))}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => handleToggleDone(service)}
+                    disabled={busyId === service.id}
+                    aria-pressed={service.is_done}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold disabled:opacity-50 ${
+                      service.is_done
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                        : 'border-slate-600 bg-slate-800 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {service.is_done ? '✓ Done' : 'Not done'}
+                  </button>
+                  <SecondaryButton
+                    onClick={() => {
+                      setEditingId(service.id)
+                      setEditValues(serviceToForm(service))
+                    }}
+                    disabled={busyId === service.id}
+                  >
+                    Edit
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onClick={() => handleDelete(service)}
+                    disabled={busyId === service.id}
+                  >
+                    Delete
+                  </SecondaryButton>
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ServiceFormFields({
+  values,
+  onChange,
+}: {
+  values: ServiceFormValues
+  onChange: (values: ServiceFormValues) => void
+}) {
+  function set(key: keyof ServiceFormValues, value: string) {
+    onChange({ ...values, [key]: value })
+  }
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="md:col-span-3">
+        <Field label="Service name">
+          <input
+            required
+            value={values.name}
+            onChange={(e) => set('name', e.target.value)}
+            className={inputClassName}
+            placeholder="e.g. Brake pad replacement"
+          />
+        </Field>
+      </div>
+      <div className="md:col-span-3">
+        <Field label="Description">
+          <textarea
+            value={values.description}
+            onChange={(e) => set('description', e.target.value)}
+            className={inputClassName}
+            rows={2}
+            placeholder="Optional details"
+          />
+        </Field>
+      </div>
+      <Field label="Labour hours">
+        <input
+          type="number"
+          min="0"
+          step="0.1"
+          value={values.laborHours}
+          onChange={(e) => set('laborHours', e.target.value)}
+          className={inputClassName}
+        />
+      </Field>
+      <Field label="Labour rate ($/hr)">
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={values.laborRate}
+          onChange={(e) => set('laborRate', e.target.value)}
+          className={inputClassName}
+        />
+      </Field>
+      <Field label="Parts total ($)">
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={values.partsTotal}
+          onChange={(e) => set('partsTotal', e.target.value)}
+          className={inputClassName}
+        />
+      </Field>
     </div>
   )
 }
