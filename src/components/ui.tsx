@@ -1,19 +1,29 @@
 import type { ReactNode } from 'react'
 import type {
+  AppointmentStatus,
   InspectionResultState,
   InspectionStatus,
   RepairOrderPriority,
   RepairOrderStatus,
 } from '../lib/types'
 import {
+  APPOINTMENT_STATUS_LABELS,
   INSPECTION_RESULT_STATE_LABELS,
   REPAIR_ORDER_PRIORITY_LABELS,
   REPAIR_ORDER_STATUS_LABELS,
 } from '../lib/types'
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = '',
+  id,
+}: {
+  children: ReactNode
+  className?: string
+  id?: string
+}) {
   return (
-    <div className={`rounded-xl border border-slate-800 bg-slate-900 p-4 ${className}`}>
+    <div id={id} className={`rounded-xl border border-slate-800 bg-slate-900 p-4 ${className}`}>
       {children}
     </div>
   )
@@ -79,6 +89,25 @@ export function InspectionStateBadge({
       className={`inline-block rounded border px-2 py-0.5 text-xs font-bold ${RESULT_STATE_STYLES[state]}`}
     >
       {label}
+    </span>
+  )
+}
+
+const APPOINTMENT_STATUS_CLASSES: Record<AppointmentStatus, string> = {
+  booked: 'border-slate-600 bg-slate-800 text-slate-300',
+  confirmed: 'border-blue-500/40 bg-blue-500/10 text-blue-400',
+  in_progress: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+  completed: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+  cancelled: 'border-red-500/40 bg-red-500/10 text-red-400',
+  no_show: 'border-red-500/40 bg-red-500/10 text-red-400',
+}
+
+export function AppointmentStatusBadge({ status }: { status: AppointmentStatus }) {
+  return (
+    <span
+      className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold ${APPOINTMENT_STATUS_CLASSES[status]}`}
+    >
+      {APPOINTMENT_STATUS_LABELS[status]}
     </span>
   )
 }
