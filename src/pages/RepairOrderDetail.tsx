@@ -1,11 +1,19 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
+  createEstimate,
+  createInvoice,
   createOrderService,
+  deleteEstimate,
+  deleteInvoice,
   deleteOrderService,
+  estimatePrefill,
   fetchRepairOrderDetail,
   fetchVehicleHistory,
   getOrCreateInspection,
+  invoiceSubtotalPrefill,
   setRepairOrderWorkCompleted,
+  updateEstimate,
+  updateInvoice,
   updateOrderService,
   updateRepairOrderFields,
   updateRepairOrderStatus,
@@ -13,8 +21,16 @@ import {
 } from '../lib/data'
 import { formatDate, formatKm, money, vehicleLabel } from '../lib/format'
 import {
+  ESTIMATE_STATUS_LABELS,
+  ESTIMATE_STATUS_TRANSITIONS,
+  INVOICE_STATUS_LABELS,
+  INVOICE_STATUS_TRANSITIONS,
   REPAIR_ORDER_STATUSES,
   REPAIR_ORDER_STATUS_LABELS,
+  type Estimate,
+  type EstimateStatus,
+  type Invoice,
+  type InvoiceStatus,
   type OrderService,
   type RepairOrder,
   type RepairOrderStatus,
@@ -222,7 +238,7 @@ export function RepairOrderDetailPage({
   if (loading) return <LoadingState message="Loading repair order…" />
   if (!detail) return <ErrorBanner message={error ?? 'Repair order not found.'} />
 
-  const { repairOrder: ro, estimates, invoices, inspectionSummary, services } = detail
+  const { repairOrder: ro, inspectionSummary, services } = detail
   const currentStep = REPAIR_ORDER_STATUSES.indexOf(ro.status)
   const vehicle = ro.vehicles
 
@@ -578,48 +594,8 @@ export function RepairOrderDetailPage({
       </Card>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <Card>
-          <h3 className="mb-3 text-base font-bold text-white">Estimates</h3>
-          {estimates.length === 0 ? (
-            <EmptyState message="No estimates yet. Creating estimates arrives in Stage 2 — existing estimates will show here." />
-          ) : (
-            <div className="space-y-2">
-              {estimates.map((est) => (
-                <div
-                  key={est.id}
-                  className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-sm"
-                >
-                  <span className="text-slate-300">
-                    {est.status} · labour {money(Number(est.labor_total))} + parts{' '}
-                    {money(Number(est.parts_total))}
-                  </span>
-                  <span className="font-bold text-white">{money(Number(est.total))}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-        <Card>
-          <h3 className="mb-3 text-base font-bold text-white">Invoices</h3>
-          {invoices.length === 0 ? (
-            <EmptyState message="No invoices yet. Creating invoices arrives in Stage 2 — existing invoices will show here." />
-          ) : (
-            <div className="space-y-2">
-              {invoices.map((inv) => (
-                <div
-                  key={inv.id}
-                  className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-sm"
-                >
-                  <span className="text-slate-300">
-                    {inv.invoice_number} · {inv.status}
-                    {inv.paid_at ? ` · paid ${formatDate(inv.paid_at)}` : ''}
-                  </span>
-                  <span className="font-bold text-white">{money(Number(inv.total))}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+        <EstimatesCard detail={detail} onChanged={load} onError={setError} />
+        <InvoicesCard detail={detail} onChanged={load} onError={setError} />
       </div>
     </div>
   )
@@ -917,6 +893,532 @@ function ServiceFormFields({
           className={inputClassName}
         />
       </Field>
+    </div>
+  )
+}
+
+// ---------- Estimates & invoices ----------
+// Totals are computed (never typed): estimate = labour + parts + tax,
+// invoice = subtotal + tax. Tax is an amount, not a rate.
+
+/** Parses a money input; blank counts as 0, anything invalid as NaN (rejected by data.ts). */
+function parseAmount(value: string): number {
+  return value.trim() === '' ? 0 : Number(value)
+}
+
+function showAmount(value: number): string {
+  return Number.isFinite(value) ? money(value) : '—'
+}
+
+const DOC_STATUS_CLASSES: Record<EstimateStatus | InvoiceStatus, string> = {
+  draft: 'border-slate-600 bg-slate-800 text-slate-300',
+  sent: 'border-blue-500/40 bg-blue-500/10 text-blue-400',
+  approved: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+  paid: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+  declined: 'border-red-500/40 bg-red-500/10 text-red-400',
+  void: 'border-red-500/40 bg-red-500/10 text-red-400',
+}
+
+function DocStatusBadge({
+  status,
+  label,
+}: {
+  status: EstimateStatus | InvoiceStatus
+  label: string
+}) {
+  return (
+    <span
+      className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${DOC_STATUS_CLASSES[status]}`}
+    >
+      {label}
+    </span>
+  )
+}
+
+function MoneyField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <Field label={label}>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={inputClassName}
+      />
+    </Field>
+  )
+}
+
+/** Shared change runner: clear the banner, do the change, reload the order. */
+function useDocAction(
+  onChanged: () => Promise<void>,
+  onError: (message: string | null) => void,
+) {
+  const [busyId, setBusyId] = useState<string | null>(null)
+  async function run(id: string, action: () => Promise<unknown>): Promise<boolean> {
+    onError(null)
+    setBusyId(id)
+    try {
+      await action()
+      await onChanged()
+      return true
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+      return false
+    } finally {
+      setBusyId(null)
+    }
+  }
+  return { busyId, run }
+}
+
+interface EstimateFormValues {
+  labor: string
+  parts: string
+  tax: string
+  notes: string
+}
+
+const ESTIMATE_ACTION_LABELS: Partial<Record<EstimateStatus, string>> = {
+  sent: 'Send',
+  approved: 'Approve',
+  declined: 'Decline',
+}
+
+function EstimatesCard({
+  detail,
+  onChanged,
+  onError,
+}: {
+  detail: RepairOrderDetail
+  onChanged: () => Promise<void>
+  onError: (message: string | null) => void
+}) {
+  const { busyId, run } = useDocAction(onChanged, onError)
+  const [showCreate, setShowCreate] = useState(false)
+  const [createValues, setCreateValues] = useState<EstimateFormValues>({
+    labor: '0',
+    parts: '0',
+    tax: '0',
+    notes: '',
+  })
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValues, setEditValues] = useState<EstimateFormValues>(createValues)
+
+  function openCreate() {
+    if (showCreate) {
+      setShowCreate(false)
+      return
+    }
+    const prefill = estimatePrefill(detail)
+    setCreateValues({
+      labor: prefill.labor.toFixed(2),
+      parts: prefill.parts.toFixed(2),
+      tax: '0',
+      notes: '',
+    })
+    setShowCreate(true)
+  }
+
+  function toFields(values: EstimateFormValues) {
+    return {
+      labor_total: parseAmount(values.labor),
+      parts_total: parseAmount(values.parts),
+      tax: parseAmount(values.tax),
+      notes: values.notes.trim() === '' ? null : values.notes.trim(),
+    }
+  }
+
+  async function handleCreate(event: FormEvent) {
+    event.preventDefault()
+    const ok = await run('new', () =>
+      createEstimate({ repair_order_id: detail.repairOrder.id, ...toFields(createValues) }),
+    )
+    if (ok) setShowCreate(false)
+  }
+
+  async function handleSaveEdit(event: FormEvent) {
+    event.preventDefault()
+    if (!editingId) return
+    const id = editingId
+    const ok = await run(id, () => updateEstimate(id, toFields(editValues)))
+    if (ok) setEditingId(null)
+  }
+
+  function handleStatus(estimate: Estimate, status: EstimateStatus) {
+    if (status === 'declined' && !window.confirm('Decline this estimate? This cannot be undone.')) {
+      return
+    }
+    void run(estimate.id, () => updateEstimate(estimate.id, { status }))
+  }
+
+  function handleDelete(estimate: Estimate) {
+    if (!window.confirm('Delete this draft estimate?')) return
+    void run(estimate.id, () => deleteEstimate(estimate.id))
+  }
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-base font-bold text-white">Estimates</h3>
+        <PrimaryButton onClick={openCreate}>
+          {showCreate ? 'Cancel' : 'Create estimate'}
+        </PrimaryButton>
+      </div>
+
+      {showCreate && (
+        <form
+          onSubmit={handleCreate}
+          className="mb-3 rounded-lg border border-slate-700 bg-slate-800/60 p-4"
+        >
+          <EstimateFormFields values={createValues} onChange={setCreateValues} />
+          <PrimaryButton type="submit" className="mt-3" disabled={busyId === 'new'}>
+            {busyId === 'new' ? 'Saving…' : 'Save estimate'}
+          </PrimaryButton>
+        </form>
+      )}
+
+      {detail.estimates.length === 0 ? (
+        <EmptyState message="No estimates yet. Use Create estimate to add one." />
+      ) : (
+        <div className="space-y-2">
+          {detail.estimates.map((est) =>
+            editingId === est.id ? (
+              <form
+                key={est.id}
+                onSubmit={handleSaveEdit}
+                className="rounded-lg border border-blue-500/50 bg-slate-800/60 p-4"
+              >
+                <EstimateFormFields values={editValues} onChange={setEditValues} />
+                <div className="mt-3 flex gap-2">
+                  <PrimaryButton type="submit" disabled={busyId === est.id}>
+                    {busyId === est.id ? 'Saving…' : 'Save'}
+                  </PrimaryButton>
+                  <SecondaryButton onClick={() => setEditingId(null)}>Cancel</SecondaryButton>
+                </div>
+              </form>
+            ) : (
+              <div
+                key={est.id}
+                className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <DocStatusBadge status={est.status} label={ESTIMATE_STATUS_LABELS[est.status]} />
+                    <span className="text-xs text-slate-400">{formatDate(est.created_at)}</span>
+                  </div>
+                  <span className="font-bold text-white">{money(Number(est.total))}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-300">
+                  Labour {money(Number(est.labor_total))} + Parts{' '}
+                  {money(Number(est.parts_total))} + Tax {money(Number(est.tax))}
+                </p>
+                {est.notes && (
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-slate-400">{est.notes}</p>
+                )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {ESTIMATE_STATUS_TRANSITIONS[est.status].map((next) => (
+                    <SecondaryButton
+                      key={next}
+                      onClick={() => handleStatus(est, next)}
+                      disabled={busyId === est.id}
+                    >
+                      {ESTIMATE_ACTION_LABELS[next]}
+                    </SecondaryButton>
+                  ))}
+                  {est.status === 'draft' && (
+                    <>
+                      <SecondaryButton
+                        onClick={() => {
+                          setEditingId(est.id)
+                          setEditValues({
+                            labor: String(est.labor_total),
+                            parts: String(est.parts_total),
+                            tax: String(est.tax),
+                            notes: est.notes ?? '',
+                          })
+                        }}
+                        disabled={busyId === est.id}
+                      >
+                        Edit
+                      </SecondaryButton>
+                      <SecondaryButton
+                        onClick={() => handleDelete(est)}
+                        disabled={busyId === est.id}
+                      >
+                        Delete
+                      </SecondaryButton>
+                    </>
+                  )}
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function EstimateFormFields({
+  values,
+  onChange,
+}: {
+  values: EstimateFormValues
+  onChange: (values: EstimateFormValues) => void
+}) {
+  const total = parseAmount(values.labor) + parseAmount(values.parts) + parseAmount(values.tax)
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <MoneyField
+        label="Labour ($)"
+        value={values.labor}
+        onChange={(v) => onChange({ ...values, labor: v })}
+      />
+      <MoneyField
+        label="Parts ($)"
+        value={values.parts}
+        onChange={(v) => onChange({ ...values, parts: v })}
+      />
+      <MoneyField
+        label="Tax ($)"
+        value={values.tax}
+        onChange={(v) => onChange({ ...values, tax: v })}
+      />
+      <div className="sm:col-span-3">
+        <Field label="Notes">
+          <textarea
+            value={values.notes}
+            onChange={(e) => onChange({ ...values, notes: e.target.value })}
+            className={inputClassName}
+            rows={2}
+            placeholder="Optional"
+          />
+        </Field>
+      </div>
+      <p className="text-sm text-slate-300 sm:col-span-3">
+        Total (labour + parts + tax):{' '}
+        <span className="font-bold text-white">{showAmount(total)}</span>
+      </p>
+    </div>
+  )
+}
+
+interface InvoiceFormValues {
+  subtotal: string
+  tax: string
+}
+
+const INVOICE_ACTION_LABELS: Partial<Record<InvoiceStatus, string>> = {
+  sent: 'Send',
+  paid: 'Mark paid',
+  void: 'Void',
+}
+
+function InvoicesCard({
+  detail,
+  onChanged,
+  onError,
+}: {
+  detail: RepairOrderDetail
+  onChanged: () => Promise<void>
+  onError: (message: string | null) => void
+}) {
+  const { busyId, run } = useDocAction(onChanged, onError)
+  const [showCreate, setShowCreate] = useState(false)
+  const [createValues, setCreateValues] = useState<InvoiceFormValues>({
+    subtotal: '0',
+    tax: '0',
+  })
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValues, setEditValues] = useState<InvoiceFormValues>(createValues)
+
+  function openCreate() {
+    if (showCreate) {
+      setShowCreate(false)
+      return
+    }
+    setCreateValues({ subtotal: invoiceSubtotalPrefill(detail).toFixed(2), tax: '0' })
+    setShowCreate(true)
+  }
+
+  async function handleCreate(event: FormEvent) {
+    event.preventDefault()
+    const ok = await run('new', () =>
+      createInvoice({
+        repair_order_id: detail.repairOrder.id,
+        subtotal: parseAmount(createValues.subtotal),
+        tax: parseAmount(createValues.tax),
+      }),
+    )
+    if (ok) setShowCreate(false)
+  }
+
+  async function handleSaveEdit(event: FormEvent) {
+    event.preventDefault()
+    if (!editingId) return
+    const id = editingId
+    const ok = await run(id, () =>
+      updateInvoice(id, {
+        subtotal: parseAmount(editValues.subtotal),
+        tax: parseAmount(editValues.tax),
+      }),
+    )
+    if (ok) setEditingId(null)
+  }
+
+  function handleStatus(invoice: Invoice, status: InvoiceStatus) {
+    if (
+      status === 'void' &&
+      !window.confirm(`Void ${invoice.invoice_number}? This cannot be undone.`)
+    ) {
+      return
+    }
+    void run(invoice.id, () => updateInvoice(invoice.id, { status }))
+  }
+
+  function handleDelete(invoice: Invoice) {
+    if (!window.confirm(`Delete draft invoice ${invoice.invoice_number}?`)) return
+    void run(invoice.id, () => deleteInvoice(invoice.id))
+  }
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-base font-bold text-white">Invoices</h3>
+        <PrimaryButton onClick={openCreate}>
+          {showCreate ? 'Cancel' : 'Create invoice'}
+        </PrimaryButton>
+      </div>
+
+      {showCreate && (
+        <form
+          onSubmit={handleCreate}
+          className="mb-3 rounded-lg border border-slate-700 bg-slate-800/60 p-4"
+        >
+          <InvoiceFormFields values={createValues} onChange={setCreateValues} />
+          <p className="mt-2 text-xs text-slate-400">
+            The invoice number (INV-…) is assigned automatically.
+          </p>
+          <PrimaryButton type="submit" className="mt-3" disabled={busyId === 'new'}>
+            {busyId === 'new' ? 'Saving…' : 'Save invoice'}
+          </PrimaryButton>
+        </form>
+      )}
+
+      {detail.invoices.length === 0 ? (
+        <EmptyState message="No invoices yet. Use Create invoice to add one." />
+      ) : (
+        <div className="space-y-2">
+          {detail.invoices.map((inv) =>
+            editingId === inv.id ? (
+              <form
+                key={inv.id}
+                onSubmit={handleSaveEdit}
+                className="rounded-lg border border-blue-500/50 bg-slate-800/60 p-4"
+              >
+                <p className="mb-2 text-sm font-semibold text-white">{inv.invoice_number}</p>
+                <InvoiceFormFields values={editValues} onChange={setEditValues} />
+                <div className="mt-3 flex gap-2">
+                  <PrimaryButton type="submit" disabled={busyId === inv.id}>
+                    {busyId === inv.id ? 'Saving…' : 'Save'}
+                  </PrimaryButton>
+                  <SecondaryButton onClick={() => setEditingId(null)}>Cancel</SecondaryButton>
+                </div>
+              </form>
+            ) : (
+              <div
+                key={inv.id}
+                className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-100">{inv.invoice_number}</span>
+                    <DocStatusBadge status={inv.status} label={INVOICE_STATUS_LABELS[inv.status]} />
+                  </div>
+                  <span className="font-bold text-white">{money(Number(inv.total))}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-300">
+                  Subtotal {money(Number(inv.subtotal))} + Tax {money(Number(inv.tax))}
+                  {inv.status === 'paid' && inv.paid_at
+                    ? ` · Paid ${formatDate(inv.paid_at)}`
+                    : ''}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {INVOICE_STATUS_TRANSITIONS[inv.status].map((next) => (
+                    <SecondaryButton
+                      key={next}
+                      onClick={() => handleStatus(inv, next)}
+                      disabled={busyId === inv.id}
+                    >
+                      {INVOICE_ACTION_LABELS[next]}
+                    </SecondaryButton>
+                  ))}
+                  {inv.status === 'draft' && (
+                    <>
+                      <SecondaryButton
+                        onClick={() => {
+                          setEditingId(inv.id)
+                          setEditValues({
+                            subtotal: String(inv.subtotal),
+                            tax: String(inv.tax),
+                          })
+                        }}
+                        disabled={busyId === inv.id}
+                      >
+                        Edit
+                      </SecondaryButton>
+                      <SecondaryButton
+                        onClick={() => handleDelete(inv)}
+                        disabled={busyId === inv.id}
+                      >
+                        Delete
+                      </SecondaryButton>
+                    </>
+                  )}
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function InvoiceFormFields({
+  values,
+  onChange,
+}: {
+  values: InvoiceFormValues
+  onChange: (values: InvoiceFormValues) => void
+}) {
+  const total = parseAmount(values.subtotal) + parseAmount(values.tax)
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <MoneyField
+        label="Subtotal ($)"
+        value={values.subtotal}
+        onChange={(v) => onChange({ ...values, subtotal: v })}
+      />
+      <MoneyField
+        label="Tax ($)"
+        value={values.tax}
+        onChange={(v) => onChange({ ...values, tax: v })}
+      />
+      <p className="text-sm text-slate-300 sm:col-span-2">
+        Total (subtotal + tax):{' '}
+        <span className="font-bold text-white">{showAmount(total)}</span>
+      </p>
     </div>
   )
 }

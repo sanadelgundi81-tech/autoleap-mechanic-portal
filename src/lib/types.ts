@@ -81,6 +81,42 @@ export const INSPECTION_RESULT_STATE_LABELS: Record<InspectionResultState, strin
   failed: 'Failed',
 }
 
+/**
+ * Allowed status changes. Estimate: draft → sent → approved or
+ * declined (a draft can also be declined outright). Invoice:
+ * draft → sent → paid, and draft/sent/paid → void. 'declined' and
+ * 'void' are terminal: no edits or status changes after them.
+ * 'approved' has no further transitions either. Amounts can only
+ * be edited while the record is 'draft'.
+ */
+export const ESTIMATE_STATUS_TRANSITIONS: Record<EstimateStatus, EstimateStatus[]> = {
+  draft: ['sent', 'declined'],
+  sent: ['approved', 'declined'],
+  approved: [],
+  declined: [],
+}
+
+export const INVOICE_STATUS_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
+  draft: ['sent', 'void'],
+  sent: ['paid', 'void'],
+  paid: ['void'],
+  void: [],
+}
+
+export const ESTIMATE_STATUS_LABELS: Record<EstimateStatus, string> = {
+  draft: 'Draft',
+  sent: 'Sent',
+  approved: 'Approved',
+  declined: 'Declined',
+}
+
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  draft: 'Draft',
+  sent: 'Sent',
+  paid: 'Paid',
+  void: 'Void',
+}
+
 export interface Customer {
   id: string
   name: string

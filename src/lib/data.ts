@@ -4,6 +4,7 @@ import type {
   CustomerWithVehicles,
   DashboardStats,
   Estimate,
+  EstimateStatus,
   Inspection,
   InspectionCounts,
   InspectionResult,
@@ -12,6 +13,7 @@ import type {
   InspectionTemplate,
   InspectionTemplateItem,
   Invoice,
+  InvoiceStatus,
   OrderService,
   RepairOrder,
   RepairOrderPriority,
@@ -19,6 +21,7 @@ import type {
   ServiceCounts,
   Vehicle,
 } from './types'
+import { ESTIMATE_STATUS_TRANSITIONS, INVOICE_STATUS_TRANSITIONS } from './types'
 
 function throwIfError(error: { message: string } | null, what: string): void {
   if (error) throw new Error(`${what}: ${error.message}`)
@@ -349,6 +352,269 @@ export async function fetchServiceCountsByRepairOrder(): Promise<
     if (row.is_done) entry.done += 1
   }
   return counts
+}
+
+// ---------- Estimates & invoices ----------
+// There is no tax rate anywhere: tax is an amount the user enters.
+// Totals are always computed here, never typed in:
+//   estimate total = labor_total + parts_total + tax
+//   invoice total  = subtotal + tax
+
+/** Rounds to cents so stored totals match numeric(10,2). */
+function cents(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+function requireAmount(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a number of 0 or more.`)
+  }
+  return cents(value)
+}
+
+export interface AmountPrefill {
+  labor: number
+  parts: number
+}
+
+/**
+ * Labour/parts prefill for a new estimate: the sums of the order's
+ * services (labor_hours × labor_rate, parts_total). With no services,
+ * falls back to the order-level labor_hours × labor_rate and parts_total.
+ */
+export function estimatePrefill(detail: RepairOrderDetail): AmountPrefill {
+  const { services, repairOrder: ro } = detail
+  if (services.length > 0) {
+    return {
+      labor: cents(
+        services.reduce((sum, s) => sum + Number(s.labor_hours) * Number(s.labor_rate), 0),
+      ),
+      parts: cents(services.reduce((sum, s) => sum + Number(s.parts_total), 0)),
+    }
+  }
+  return {
+    labor: cents(Number(ro.labor_hours) * Number(ro.labor_rate)),
+    parts: cents(Number(ro.parts_total)),
+  }
+}
+
+/**
+ * Subtotal prefill for a new invoice: the latest approved estimate's
+ * total if there is one, otherwise labour + parts from estimatePrefill.
+ */
+export function invoiceSubtotalPrefill(detail: RepairOrderDetail): number {
+  const approved = detail.estimates
+    .filter((e) => e.status === 'approved')
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+  if (approved) return cents(Number(approved.total))
+  const { labor, parts } = estimatePrefill(detail)
+  return cents(labor + parts)
+}
+
+async function fetchEstimate(id: string): Promise<Estimate> {
+  const client = requireClient()
+  const { data, error } = await client.from('estimates').select('*').eq('id', id).single()
+  throwIfError(error, 'Failed to load estimate')
+  return data as Estimate
+}
+
+async function fetchInvoice(id: string): Promise<Invoice> {
+  const client = requireClient()
+  const { data, error } = await client.from('invoices').select('*').eq('id', id).single()
+  throwIfError(error, 'Failed to load invoice')
+  return data as Invoice
+}
+
+export interface NewEstimateInput {
+  repair_order_id: string
+  labor_total: number
+  parts_total: number
+  tax: number
+  notes: string | null
+}
+
+export async function createEstimate(input: NewEstimateInput): Promise<Estimate> {
+  const client = requireClient()
+  const labor = requireAmount(input.labor_total, 'Labour')
+  const parts = requireAmount(input.parts_total, 'Parts')
+  const tax = requireAmount(input.tax, 'Tax')
+  const { data, error } = await client
+    .from('estimates')
+    .insert({
+      repair_order_id: input.repair_order_id,
+      status: 'draft',
+      labor_total: labor,
+      parts_total: parts,
+      tax,
+      total: cents(labor + parts + tax),
+      notes: input.notes,
+    })
+    .select('*')
+    .single()
+  throwIfError(error, 'Failed to create estimate')
+  return data as Estimate
+}
+
+export interface EstimateUpdates {
+  labor_total?: number
+  parts_total?: number
+  tax?: number
+  notes?: string | null
+  status?: EstimateStatus
+}
+
+/**
+ * Amounts can only change while the estimate is draft; status follows
+ * ESTIMATE_STATUS_TRANSITIONS; nothing changes once it is declined.
+ * The total is recomputed on every update. The update only applies if
+ * the status is still what was read, so two people can't race past
+ * the rules.
+ */
+export async function updateEstimate(id: string, updates: EstimateUpdates): Promise<void> {
+  const client = requireClient()
+  const current = await fetchEstimate(id)
+  if (current.status === 'declined') {
+    throw new Error('A declined estimate can no longer be changed.')
+  }
+  const changesAmounts =
+    updates.labor_total !== undefined ||
+    updates.parts_total !== undefined ||
+    updates.tax !== undefined
+  if (changesAmounts && current.status !== 'draft') {
+    throw new Error('Only a draft estimate can have its amounts edited.')
+  }
+  if (
+    updates.status !== undefined &&
+    updates.status !== current.status &&
+    !ESTIMATE_STATUS_TRANSITIONS[current.status].includes(updates.status)
+  ) {
+    throw new Error(`An estimate can't move from ${current.status} to ${updates.status}.`)
+  }
+  const labor = requireAmount(updates.labor_total ?? Number(current.labor_total), 'Labour')
+  const parts = requireAmount(updates.parts_total ?? Number(current.parts_total), 'Parts')
+  const tax = requireAmount(updates.tax ?? Number(current.tax), 'Tax')
+  const { data, error } = await client
+    .from('estimates')
+    .update({
+      ...updates,
+      labor_total: labor,
+      parts_total: parts,
+      tax,
+      total: cents(labor + parts + tax),
+    })
+    .eq('id', id)
+    .eq('status', current.status)
+    .select('id')
+  throwIfError(error, 'Failed to update estimate')
+  if (!data || data.length === 0) {
+    throw new Error('The estimate changed while you were editing it. Reload and try again.')
+  }
+}
+
+export async function deleteEstimate(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('estimates')
+    .delete()
+    .eq('id', id)
+    .eq('status', 'draft')
+    .select('id')
+  throwIfError(error, 'Failed to delete estimate')
+  if (!data || data.length === 0) {
+    throw new Error('Only a draft estimate can be deleted.')
+  }
+}
+
+export interface NewInvoiceInput {
+  repair_order_id: string
+  subtotal: number
+  tax: number
+}
+
+/** invoice_number is NOT set here: the database default fills INV-####. */
+export async function createInvoice(input: NewInvoiceInput): Promise<Invoice> {
+  const client = requireClient()
+  const subtotal = requireAmount(input.subtotal, 'Subtotal')
+  const tax = requireAmount(input.tax, 'Tax')
+  const { data, error } = await client
+    .from('invoices')
+    .insert({
+      repair_order_id: input.repair_order_id,
+      status: 'draft',
+      subtotal,
+      tax,
+      total: cents(subtotal + tax),
+    })
+    .select('*')
+    .single()
+  throwIfError(error, 'Failed to create invoice')
+  return data as Invoice
+}
+
+export interface InvoiceUpdates {
+  subtotal?: number
+  tax?: number
+  status?: InvoiceStatus
+}
+
+/**
+ * Amounts can only change while the invoice is draft; status follows
+ * INVOICE_STATUS_TRANSITIONS; nothing changes once it is void.
+ * Moving to 'paid' sets paid_at to now; moving away from 'paid'
+ * clears it. The total is recomputed on every update.
+ */
+export async function updateInvoice(id: string, updates: InvoiceUpdates): Promise<void> {
+  const client = requireClient()
+  const current = await fetchInvoice(id)
+  if (current.status === 'void') {
+    throw new Error('A void invoice can no longer be changed.')
+  }
+  const changesAmounts = updates.subtotal !== undefined || updates.tax !== undefined
+  if (changesAmounts && current.status !== 'draft') {
+    throw new Error('Only a draft invoice can have its amounts edited.')
+  }
+  const nextStatus = updates.status ?? current.status
+  if (
+    nextStatus !== current.status &&
+    !INVOICE_STATUS_TRANSITIONS[current.status].includes(nextStatus)
+  ) {
+    throw new Error(`An invoice can't move from ${current.status} to ${nextStatus}.`)
+  }
+  const subtotal = requireAmount(updates.subtotal ?? Number(current.subtotal), 'Subtotal')
+  const tax = requireAmount(updates.tax ?? Number(current.tax), 'Tax')
+  let paidAt = current.paid_at
+  if (nextStatus === 'paid' && current.status !== 'paid') paidAt = new Date().toISOString()
+  if (nextStatus !== 'paid') paidAt = null
+  const { data, error } = await client
+    .from('invoices')
+    .update({
+      subtotal,
+      tax,
+      total: cents(subtotal + tax),
+      status: nextStatus,
+      paid_at: paidAt,
+    })
+    .eq('id', id)
+    .eq('status', current.status)
+    .select('id')
+  throwIfError(error, 'Failed to update invoice')
+  if (!data || data.length === 0) {
+    throw new Error('The invoice changed while you were editing it. Reload and try again.')
+  }
+}
+
+export async function deleteInvoice(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('invoices')
+    .delete()
+    .eq('id', id)
+    .eq('status', 'draft')
+    .select('id')
+  throwIfError(error, 'Failed to delete invoice')
+  if (!data || data.length === 0) {
+    throw new Error('Only a draft invoice can be deleted.')
+  }
 }
 
 // ---------- Inspections ----------
