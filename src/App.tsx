@@ -11,6 +11,7 @@ import { Customers } from './pages/Customers'
 import { Appointments } from './pages/Appointments'
 import { Notifications } from './pages/Notifications'
 import { Timelogs } from './pages/Timelogs'
+import { Earnings } from './pages/Earnings'
 import { fetchUnreadNotificationCount } from './lib/data'
 import { LoadingState } from './components/ui'
 
@@ -111,6 +112,7 @@ function Shell() {
         />
       )}
       {view.name === 'timelogs' && <Timelogs onNavigate={setView} />}
+      {view.name === 'earnings' && <Earnings onNavigate={setView} />}
       {view.name === 'notifications' && (
         <Notifications onNavigate={setView} onUnreadChange={refreshUnread} />
       )}

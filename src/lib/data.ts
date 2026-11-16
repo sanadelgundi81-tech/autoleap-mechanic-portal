@@ -7,6 +7,7 @@ import type {
   Customer,
   CustomerWithVehicles,
   DashboardStats,
+  EarningsSummary,
   Estimate,
   EstimateStatus,
   Inspection,
@@ -21,6 +22,7 @@ import type {
   NotificationRelatedType,
   NotificationType,
   OrderService,
+  PaidInvoiceRow,
   RepairOrder,
   RepairOrderPriority,
   RepairOrderStatus,
@@ -910,6 +912,117 @@ export async function deleteAppointment(id: string): Promise<void> {
   if (!data || data.length === 0) {
     throw new Error('Only a booked or confirmed appointment can be deleted.')
   }
+}
+
+// ---------- Earnings ----------
+// Read-only over invoices: no writes, no notifications. Money is summed
+// in code from invoice totals. Paid = status 'paid' AND paid_at set;
+// outstanding = status 'sent'; draft and void never count.
+// Periods use the browser's local time: today from local midnight, the
+// week from Monday 00:00, the month from the 1st 00:00, each up to (not
+// including) the start of the next day / week / month.
+
+export interface EarningsPeriods {
+  todayStart: Date
+  tomorrowStart: Date
+  weekStart: Date
+  nextWeekStart: Date
+  monthStart: Date
+  nextMonthStart: Date
+}
+
+/** Local-time period boundaries for `now` (week starts Monday). */
+export function earningsPeriods(now: Date = new Date()): EarningsPeriods {
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  const daysSinceMonday = (now.getDay() + 6) % 7 // Sunday (0) → 6, Monday (1) → 0
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday)
+  const nextWeekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7)
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  return { todayStart, tomorrowStart, weekStart, nextWeekStart, monthStart, nextMonthStart }
+}
+
+/**
+ * Collected totals and paid counts for today / this week / this month /
+ * all time, plus outstanding (sent, unpaid). `now` is injectable for tests.
+ */
+export async function fetchEarningsSummary(now: Date = new Date()): Promise<EarningsSummary> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('invoices')
+    .select('status, total, paid_at')
+    .in('status', ['paid', 'sent'])
+  throwIfError(error, 'Failed to load invoices')
+  const p = earningsPeriods(now)
+  const within = (t: number, from: Date, to: Date) => t >= from.getTime() && t < to.getTime()
+  const sums = { today: 0, week: 0, month: 0, all: 0, outstanding: 0 }
+  const counts = { today: 0, week: 0, month: 0, all: 0 }
+  for (const row of (data ?? []) as { status: InvoiceStatus; total: number; paid_at: string | null }[]) {
+    const total = Number(row.total ?? 0)
+    if (row.status === 'sent') {
+      sums.outstanding += total
+      continue
+    }
+    if (row.status !== 'paid' || !row.paid_at) continue
+    const t = new Date(row.paid_at).getTime()
+    sums.all += total
+    counts.all += 1
+    if (within(t, p.todayStart, p.tomorrowStart)) {
+      sums.today += total
+      counts.today += 1
+    }
+    if (within(t, p.weekStart, p.nextWeekStart)) {
+      sums.week += total
+      counts.week += 1
+    }
+    if (within(t, p.monthStart, p.nextMonthStart)) {
+      sums.month += total
+      counts.month += 1
+    }
+  }
+  return {
+    collectedToday: cents(sums.today),
+    collectedThisWeek: cents(sums.week),
+    collectedThisMonth: cents(sums.month),
+    collectedAllTime: cents(sums.all),
+    outstanding: cents(sums.outstanding),
+    paidCountToday: counts.today,
+    paidCountThisWeek: counts.week,
+    paidCountThisMonth: counts.month,
+    paidCountAllTime: counts.all,
+  }
+}
+
+/** Paid invoices, newest paid first, with order number and customer name. */
+export async function fetchRecentPaidInvoices(limit = 20): Promise<PaidInvoiceRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('invoices')
+    .select('id, invoice_number, total, paid_at, repair_order_id, repair_orders(id, ro_number, customers(id, name))')
+    .eq('status', 'paid')
+    .not('paid_at', 'is', null)
+    .order('paid_at', { ascending: false })
+    .limit(limit)
+  throwIfError(error, 'Failed to load paid invoices')
+  return (
+    (data ?? []) as unknown as {
+      id: string
+      invoice_number: string
+      total: number
+      paid_at: string
+      repair_order_id: string
+      repair_orders: { ro_number: string; customers: { name: string } | null } | null
+    }[]
+  ).map((row) => ({
+    id: row.id,
+    invoice_number: row.invoice_number,
+    total: Number(row.total),
+    paid_at: row.paid_at,
+    repair_order_id: row.repair_order_id,
+    ro_number: row.repair_orders?.ro_number ?? null,
+    customer_name: row.repair_orders?.customers?.name ?? null,
+  }))
 }
 
 // ---------- Timelogs ----------

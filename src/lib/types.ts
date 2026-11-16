@@ -196,6 +196,36 @@ export interface Timelog {
   } | null
 }
 
+/**
+ * Earnings, computed in code from invoice totals (read-only).
+ * Collected = invoices with status 'paid' AND paid_at set, by paid_at
+ * in the browser's local time (week starts Monday, calendar month).
+ * Outstanding = invoices with status 'sent'. Draft and void never count.
+ */
+export interface EarningsSummary {
+  collectedToday: number
+  collectedThisWeek: number
+  collectedThisMonth: number
+  collectedAllTime: number
+  outstanding: number
+  paidCountToday: number
+  paidCountThisWeek: number
+  paidCountThisMonth: number
+  paidCountAllTime: number
+}
+
+/** One row of the Recent paid invoices list. */
+export interface PaidInvoiceRow {
+  id: string
+  invoice_number: string
+  total: number
+  paid_at: string
+  /** For the link to the repair order detail. */
+  repair_order_id: string
+  ro_number: string | null
+  customer_name: string | null
+}
+
 export interface Customer {
   id: string
   name: string
