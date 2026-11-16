@@ -17,6 +17,7 @@ export type View =
   | { name: 'appointments'; prefill?: AppointmentPrefill; focusAppointmentId?: string }
   | { name: 'notifications' }
   | { name: 'timelogs' }
+  | { name: 'earnings' }
   | { name: 'customers'; focusCustomerId?: string }
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
@@ -25,6 +26,7 @@ const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'appointments', label: 'Appointments' },
   { name: 'notifications', label: 'Notifications' },
   { name: 'timelogs', label: 'Timelogs' },
+  { name: 'earnings', label: 'Earnings' },
   { name: 'customers', label: 'Customers' },
 ]
 
@@ -108,7 +110,7 @@ export function Layout({
         <main className="flex-1 p-6 pb-20 md:pb-6">{children}</main>
       </div>
 
-      {/* Six items: keep them on one line and let the bar scroll sideways on narrow phones. */}
+      {/* Seven items: keep them on one line and let the bar scroll sideways on narrow phones. */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between gap-4 overflow-x-auto whitespace-nowrap border-t border-slate-800 bg-slate-900 px-4 py-2.5 text-xs md:hidden">
         {NAV_ITEMS.map((item) => {
           const active =
