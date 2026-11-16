@@ -117,6 +117,33 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   void: 'Void',
 }
 
+/**
+ * Allowed appointment status changes: booked → confirmed →
+ * in_progress → completed; cancelled and no_show can be set from
+ * booked or confirmed. completed, cancelled and no_show are terminal.
+ * Time/service/vehicle can only be edited while booked or confirmed.
+ */
+export const APPOINTMENT_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
+  booked: ['confirmed', 'cancelled', 'no_show'],
+  confirmed: ['in_progress', 'cancelled', 'no_show'],
+  in_progress: ['completed'],
+  completed: [],
+  cancelled: [],
+  no_show: [],
+}
+
+/** Statuses in which an appointment can still be edited or deleted. */
+export const APPOINTMENT_EDITABLE_STATUSES: AppointmentStatus[] = ['booked', 'confirmed']
+
+export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
+  booked: 'Booked',
+  confirmed: 'Confirmed',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  no_show: 'No-show',
+}
+
 export interface Customer {
   id: string
   name: string
@@ -216,6 +243,17 @@ export interface Appointment {
   notes: string | null
   created_at: string
   updated_at: string
+  /** Joined for display by the appointment fetches. */
+  customers?: { id: string; name: string } | null
+  vehicles?: {
+    id: string
+    year: number | null
+    make: string
+    model: string
+    trim: string | null
+    license_plate: string | null
+  } | null
+  repair_orders?: { id: string; ro_number: string } | null
 }
 
 export interface InspectionTemplate {

@@ -19,7 +19,13 @@ import {
   updateRepairOrderStatus,
   type RepairOrderDetail,
 } from '../lib/data'
-import { formatDate, formatKm, money, vehicleLabel } from '../lib/format'
+import {
+  formatAppointmentTime,
+  formatDate,
+  formatKm,
+  money,
+  vehicleLabel,
+} from '../lib/format'
 import {
   ESTIMATE_STATUS_LABELS,
   ESTIMATE_STATUS_TRANSITIONS,
@@ -36,6 +42,7 @@ import {
   type RepairOrderStatus,
 } from '../lib/types'
 import {
+  AppointmentStatusBadge,
   Card,
   EmptyState,
   ErrorBanner,
@@ -597,6 +604,53 @@ export function RepairOrderDetailPage({
         <EstimatesCard detail={detail} onChanged={load} onError={setError} />
         <InvoicesCard detail={detail} onChanged={load} onError={setError} />
       </div>
+
+      <Card>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-base font-bold text-white">Appointments</h3>
+          <PrimaryButton
+            onClick={() =>
+              onNavigate({
+                name: 'appointments',
+                prefill: {
+                  customerId: ro.customer_id,
+                  vehicleId: ro.vehicle_id,
+                  repairOrderId: ro.id,
+                  roNumber: ro.ro_number,
+                },
+              })
+            }
+          >
+            New appointment
+          </PrimaryButton>
+        </div>
+        {detail.appointments.length === 0 ? (
+          <EmptyState message="No appointments for this order yet." />
+        ) : (
+          <div className="space-y-2">
+            {detail.appointments.map((appt) => (
+              <div
+                key={appt.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-sm"
+              >
+                <div>
+                  <p className="font-semibold text-slate-100">
+                    {formatAppointmentTime(appt.starts_at, appt.ends_at)}
+                  </p>
+                  <p className="text-xs text-slate-400">{appt.service ?? 'No service noted'}</p>
+                </div>
+                <AppointmentStatusBadge status={appt.status} />
+              </div>
+            ))}
+            <button
+              onClick={() => onNavigate({ name: 'appointments' })}
+              className="text-sm font-semibold text-blue-400 hover:text-blue-300"
+            >
+              Manage on the Appointments page
+            </button>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

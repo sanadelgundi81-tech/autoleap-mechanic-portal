@@ -13,7 +13,7 @@ import {
   inputClassName,
 } from '../components/ui'
 
-export function Customers() {
+export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}) {
   const [customers, setCustomers] = useState<CustomerWithVehicles[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -63,6 +63,14 @@ export function Customers() {
       cancelled = true
     }
   }, [])
+
+  // Opened from an appointment's customer link: bring that customer into view.
+  useEffect(() => {
+    if (loading || !focusCustomerId) return
+    document
+      .getElementById(`customer-${focusCustomerId}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [loading, focusCustomerId])
 
   async function handleCreateCustomer(event: FormEvent) {
     event.preventDefault()
@@ -187,7 +195,11 @@ export function Customers() {
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {customers.map((customer) => (
-            <Card key={customer.id}>
+            <Card
+              key={customer.id}
+              id={`customer-${customer.id}`}
+              className={customer.id === focusCustomerId ? 'ring-2 ring-blue-500' : ''}
+            >
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-white">{customer.name}</h3>

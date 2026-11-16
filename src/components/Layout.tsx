@@ -1,16 +1,26 @@
 import type { ReactNode } from 'react'
 import { useAuth } from '../context/AuthContext'
 
+/** Opens the Appointments page with the New appointment form prefilled from an order. */
+export interface AppointmentPrefill {
+  customerId: string
+  vehicleId: string | null
+  repairOrderId: string
+  roNumber: string
+}
+
 export type View =
   | { name: 'dashboard' }
   | { name: 'repair-orders' }
   | { name: 'repair-order'; id: string }
   | { name: 'inspection'; inspectionId: string; repairOrderId: string }
-  | { name: 'customers' }
+  | { name: 'appointments'; prefill?: AppointmentPrefill }
+  | { name: 'customers'; focusCustomerId?: string }
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'dashboard', label: 'Dashboard' },
   { name: 'repair-orders', label: 'Repair Orders' },
+  { name: 'appointments', label: 'Appointments' },
   { name: 'customers', label: 'Customers' },
 ]
 

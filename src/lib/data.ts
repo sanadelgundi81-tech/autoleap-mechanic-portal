@@ -1,5 +1,7 @@
 import { requireClient } from './supabase'
 import type {
+  Appointment,
+  AppointmentStatus,
   Customer,
   CustomerWithVehicles,
   DashboardStats,
@@ -21,7 +23,12 @@ import type {
   ServiceCounts,
   Vehicle,
 } from './types'
-import { ESTIMATE_STATUS_TRANSITIONS, INVOICE_STATUS_TRANSITIONS } from './types'
+import {
+  APPOINTMENT_EDITABLE_STATUSES,
+  APPOINTMENT_STATUS_TRANSITIONS,
+  ESTIMATE_STATUS_TRANSITIONS,
+  INVOICE_STATUS_TRANSITIONS,
+} from './types'
 
 function throwIfError(error: { message: string } | null, what: string): void {
   if (error) throw new Error(`${what}: ${error.message}`)
@@ -150,11 +157,12 @@ export interface RepairOrderDetail {
   invoices: Invoice[]
   inspectionSummary: InspectionSummary
   services: OrderService[]
+  appointments: Appointment[]
 }
 
 export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDetail> {
   const client = requireClient()
-  const [ro, estimates, invoices, inspection, services] = await Promise.all([
+  const [ro, estimates, invoices, inspection, services, appointments] = await Promise.all([
     client.from('repair_orders').select(RO_SELECT).eq('id', id).single(),
     client
       .from('estimates')
@@ -174,6 +182,7 @@ export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDet
       .limit(1)
       .maybeSingle(),
     fetchOrderServices(id),
+    fetchAppointmentsByRepairOrder(id),
   ])
 
   throwIfError(ro.error, 'Failed to load repair order')
@@ -196,6 +205,7 @@ export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDet
     invoices: (invoices.data ?? []) as Invoice[],
     inspectionSummary,
     services,
+    appointments,
   }
 }
 
@@ -614,6 +624,175 @@ export async function deleteInvoice(id: string): Promise<void> {
   throwIfError(error, 'Failed to delete invoice')
   if (!data || data.length === 0) {
     throw new Error('Only a draft invoice can be deleted.')
+  }
+}
+
+// ---------- Appointments ----------
+// A customer is required; the vehicle and repair order are optional
+// (a booking can exist before any repair order). Deleting a repair
+// order keeps its appointments (FK is SET NULL); deleting a customer
+// deletes theirs (CASCADE). Times are timestamptz, sent as ISO strings.
+
+const APPOINTMENT_SELECT =
+  '*, customers(id, name), vehicles(id, year, make, model, trim, license_plate), repair_orders(id, ro_number)'
+
+/** All appointments with customer, vehicle and order joined, earliest start first. */
+export async function fetchAppointments(): Promise<Appointment[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('appointments')
+    .select(APPOINTMENT_SELECT)
+    .order('starts_at', { ascending: true })
+  throwIfError(error, 'Failed to load appointments')
+  return (data ?? []) as Appointment[]
+}
+
+export async function fetchAppointmentsByRepairOrder(
+  repairOrderId: string,
+): Promise<Appointment[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('appointments')
+    .select(APPOINTMENT_SELECT)
+    .eq('repair_order_id', repairOrderId)
+    .order('starts_at', { ascending: true })
+  throwIfError(error, 'Failed to load appointments')
+  return (data ?? []) as Appointment[]
+}
+
+export async function fetchAppointmentsByCustomer(customerId: string): Promise<Appointment[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('appointments')
+    .select(APPOINTMENT_SELECT)
+    .eq('customer_id', customerId)
+    .order('starts_at', { ascending: true })
+  throwIfError(error, 'Failed to load appointments')
+  return (data ?? []) as Appointment[]
+}
+
+/** Rejects a missing/invalid start, or an end that is not after the start. */
+function checkAppointmentTimes(startsAt: string, endsAt: string | null): void {
+  const start = new Date(startsAt).getTime()
+  if (Number.isNaN(start)) throw new Error('A valid start time is required.')
+  if (endsAt !== null) {
+    const end = new Date(endsAt).getTime()
+    if (Number.isNaN(end)) throw new Error('The end time is not valid.')
+    if (end <= start) throw new Error('The end time must be after the start time.')
+  }
+}
+
+/** The vehicle on an appointment must belong to the appointment's customer. */
+async function checkVehicleBelongsToCustomer(
+  vehicleId: string | null,
+  customerId: string,
+): Promise<void> {
+  if (vehicleId === null) return
+  const client = requireClient()
+  const { data, error } = await client
+    .from('vehicles')
+    .select('customer_id')
+    .eq('id', vehicleId)
+    .single()
+  throwIfError(error, 'Failed to load vehicle')
+  if ((data as { customer_id: string }).customer_id !== customerId) {
+    throw new Error("That vehicle doesn't belong to this customer.")
+  }
+}
+
+export interface NewAppointmentInput {
+  customer_id: string
+  vehicle_id: string | null
+  repair_order_id: string | null
+  starts_at: string
+  ends_at: string | null
+  service: string | null
+  notes: string | null
+}
+
+export async function createAppointment(input: NewAppointmentInput): Promise<Appointment> {
+  const client = requireClient()
+  if (!input.customer_id) throw new Error('A customer is required.')
+  checkAppointmentTimes(input.starts_at, input.ends_at)
+  await checkVehicleBelongsToCustomer(input.vehicle_id, input.customer_id)
+  const { data, error } = await client
+    .from('appointments')
+    .insert({ ...input, status: 'booked' })
+    .select(APPOINTMENT_SELECT)
+    .single()
+  throwIfError(error, 'Failed to book appointment')
+  return data as Appointment
+}
+
+export interface AppointmentUpdates {
+  starts_at?: string
+  ends_at?: string | null
+  service?: string | null
+  notes?: string | null
+  vehicle_id?: string | null
+  status?: AppointmentStatus
+}
+
+/**
+ * Time/service/vehicle (and notes) can only change while booked or
+ * confirmed; status follows APPOINTMENT_STATUS_TRANSITIONS; completed,
+ * cancelled and no_show are terminal. The update only applies if the
+ * status is still what was read.
+ */
+export async function updateAppointment(id: string, updates: AppointmentUpdates): Promise<void> {
+  const client = requireClient()
+  const { data: found, error: findError } = await client
+    .from('appointments')
+    .select('*')
+    .eq('id', id)
+    .single()
+  throwIfError(findError, 'Failed to load appointment')
+  const current = found as Appointment
+  if (APPOINTMENT_STATUS_TRANSITIONS[current.status].length === 0) {
+    throw new Error(`A ${current.status.replace('_', '-')} appointment can no longer be changed.`)
+  }
+  const { status, ...details } = updates
+  const changesDetails = Object.values(details).some((v) => v !== undefined)
+  if (changesDetails && !APPOINTMENT_EDITABLE_STATUSES.includes(current.status)) {
+    throw new Error('Only a booked or confirmed appointment can be edited.')
+  }
+  if (
+    status !== undefined &&
+    status !== current.status &&
+    !APPOINTMENT_STATUS_TRANSITIONS[current.status].includes(status)
+  ) {
+    throw new Error(`An appointment can't move from ${current.status} to ${status}.`)
+  }
+  checkAppointmentTimes(
+    updates.starts_at ?? current.starts_at,
+    updates.ends_at !== undefined ? updates.ends_at : current.ends_at,
+  )
+  if (updates.vehicle_id !== undefined) {
+    await checkVehicleBelongsToCustomer(updates.vehicle_id, current.customer_id)
+  }
+  const { data, error } = await client
+    .from('appointments')
+    .update(updates)
+    .eq('id', id)
+    .eq('status', current.status)
+    .select('id')
+  throwIfError(error, 'Failed to update appointment')
+  if (!data || data.length === 0) {
+    throw new Error('The appointment changed while you were editing it. Reload and try again.')
+  }
+}
+
+export async function deleteAppointment(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('appointments')
+    .delete()
+    .eq('id', id)
+    .in('status', APPOINTMENT_EDITABLE_STATUSES)
+    .select('id')
+  throwIfError(error, 'Failed to delete appointment')
+  if (!data || data.length === 0) {
+    throw new Error('Only a booked or confirmed appointment can be deleted.')
   }
 }
 

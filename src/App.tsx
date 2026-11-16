@@ -8,6 +8,7 @@ import { RepairOrders } from './pages/RepairOrders'
 import { RepairOrderDetailPage } from './pages/RepairOrderDetail'
 import { InspectionPage } from './pages/InspectionPage'
 import { Customers } from './pages/Customers'
+import { Appointments } from './pages/Appointments'
 import { LoadingState } from './components/ui'
 
 function SetupNotice() {
@@ -82,7 +83,15 @@ function Shell() {
           onNavigate={setView}
         />
       )}
-      {view.name === 'customers' && <Customers />}
+      {view.name === 'appointments' && (
+        // key: a new prefill (from an order) remounts the page so its form opens prefilled.
+        <Appointments
+          key={view.prefill?.repairOrderId ?? 'all'}
+          prefill={view.prefill}
+          onNavigate={setView}
+        />
+      )}
+      {view.name === 'customers' && <Customers focusCustomerId={view.focusCustomerId} />}
     </Layout>
   )
 }
