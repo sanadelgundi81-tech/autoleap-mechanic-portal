@@ -16,6 +16,7 @@ export type View =
   | { name: 'inspection'; inspectionId: string; repairOrderId: string }
   | { name: 'appointments'; prefill?: AppointmentPrefill; focusAppointmentId?: string }
   | { name: 'notifications' }
+  | { name: 'timelogs' }
   | { name: 'customers'; focusCustomerId?: string }
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
@@ -23,6 +24,7 @@ const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'repair-orders', label: 'Repair Orders' },
   { name: 'appointments', label: 'Appointments' },
   { name: 'notifications', label: 'Notifications' },
+  { name: 'timelogs', label: 'Timelogs' },
   { name: 'customers', label: 'Customers' },
 ]
 
@@ -106,7 +108,8 @@ export function Layout({
         <main className="flex-1 p-6 pb-20 md:pb-6">{children}</main>
       </div>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-slate-800 bg-slate-900 px-4 py-2.5 text-xs md:hidden">
+      {/* Six items: keep them on one line and let the bar scroll sideways on narrow phones. */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between gap-4 overflow-x-auto whitespace-nowrap border-t border-slate-800 bg-slate-900 px-4 py-2.5 text-xs md:hidden">
         {NAV_ITEMS.map((item) => {
           const active =
             view.name === item.name ||
@@ -115,7 +118,7 @@ export function Layout({
             <button
               key={item.name}
               onClick={() => onNavigate({ name: item.name } as View)}
-              className={`font-semibold ${active ? 'text-blue-400' : 'text-slate-300'}`}
+              className={`shrink-0 font-semibold ${active ? 'text-blue-400' : 'text-slate-300'}`}
             >
               {item.label}
               {item.name === 'notifications' && <UnreadBadge count={unreadCount} />}

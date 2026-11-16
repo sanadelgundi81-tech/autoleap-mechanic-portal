@@ -12,6 +12,8 @@ import {
   getOrCreateInspection,
   invoiceSubtotalPrefill,
   setRepairOrderWorkCompleted,
+  startTimelog,
+  stopTimelog,
   updateEstimate,
   updateInvoice,
   updateOrderService,
@@ -22,8 +24,11 @@ import {
 import {
   formatAppointmentTime,
   formatDate,
+  formatDuration,
   formatKm,
+  formatTimelogRange,
   money,
+  timelogMinutes,
   vehicleLabel,
 } from '../lib/format'
 import {
@@ -651,7 +656,106 @@ export function RepairOrderDetailPage({
           </div>
         )}
       </Card>
+
+      <TimelogsCard detail={detail} onChanged={load} onError={setError} onNavigate={onNavigate} />
     </div>
+  )
+}
+
+// ---------- Timelogs card ----------
+// A record of time worked — never changes labour charges or totals.
+
+function TimelogsCard({
+  detail,
+  onChanged,
+  onError,
+  onNavigate,
+}: {
+  detail: RepairOrderDetail
+  onChanged: () => Promise<void>
+  onError: (message: string | null) => void
+  onNavigate: (view: View) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const { timelogs, totalMinutes } = detail.timelogs
+  const running = timelogs.find((t) => t.ended_at === null) ?? null
+  const now = Date.now()
+
+  async function handleStartStop() {
+    onError(null)
+    setBusy(true)
+    try {
+      if (running) await stopTimelog(running.id)
+      else await startTimelog(detail.repairOrder.id, note)
+      setNote('')
+      await onChanged()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-base font-bold text-white">Timelogs</h3>
+          <p className="text-xs text-slate-400">
+            Total logged: <span className="font-semibold text-slate-200">{formatDuration(totalMinutes)}</span>
+            {running ? ' (includes the running timer)' : ''} · for reference, not billed
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {!running && (
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className={`${inputClassName} w-48`}
+              placeholder="Note (optional)"
+              aria-label="Timelog note"
+            />
+          )}
+          <PrimaryButton onClick={() => void handleStartStop()} disabled={busy}>
+            {busy ? 'Saving…' : running ? 'Stop' : 'Start'}
+          </PrimaryButton>
+        </div>
+      </div>
+      {timelogs.length === 0 ? (
+        <EmptyState message="No time logged on this order yet." />
+      ) : (
+        <div className="space-y-2">
+          {timelogs.map((t) => (
+            <div
+              key={t.id}
+              className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm ${
+                t.ended_at === null
+                  ? 'border-emerald-500/40 bg-emerald-500/5'
+                  : 'border-slate-700 bg-slate-800/60'
+              }`}
+            >
+              <div>
+                <p className="font-semibold text-slate-100">
+                  {formatTimelogRange(t.started_at, t.ended_at)}
+                </p>
+                {t.note && <p className="text-xs text-slate-400">{t.note}</p>}
+              </div>
+              <span className="font-semibold text-white">
+                {formatDuration(timelogMinutes(t.started_at, t.ended_at, now))}
+                {t.ended_at === null ? ' so far' : ''}
+              </span>
+            </div>
+          ))}
+          <button
+            onClick={() => onNavigate({ name: 'timelogs' })}
+            className="text-sm font-semibold text-blue-400 hover:text-blue-300"
+          >
+            Edit notes or add a manual entry on the Timelogs page
+          </button>
+        </div>
+      )}
+    </Card>
   )
 }
 
