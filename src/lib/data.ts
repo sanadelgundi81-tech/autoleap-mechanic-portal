@@ -1,5 +1,7 @@
 import { requireClient } from './supabase'
+import { formatAppointmentTime, money } from './format'
 import type {
+  AppNotification,
   Appointment,
   AppointmentStatus,
   Customer,
@@ -16,6 +18,8 @@ import type {
   InspectionTemplateItem,
   Invoice,
   InvoiceStatus,
+  NotificationRelatedType,
+  NotificationType,
   OrderService,
   RepairOrder,
   RepairOrderPriority,
@@ -28,6 +32,7 @@ import {
   APPOINTMENT_STATUS_TRANSITIONS,
   ESTIMATE_STATUS_TRANSITIONS,
   INVOICE_STATUS_TRANSITIONS,
+  REPAIR_ORDER_STATUS_LABELS,
 } from './types'
 
 function throwIfError(error: { message: string } | null, what: string): void {
@@ -237,8 +242,30 @@ export async function updateRepairOrderStatus(
   status: RepairOrderStatus,
 ): Promise<void> {
   const client = requireClient()
+  // Moving into a waiting status creates an order_waiting notification,
+  // so read the previous status first (only for those two targets).
+  const waiting = status === 'waiting_for_approval' || status === 'waiting_for_parts'
+  let previous: { status: RepairOrderStatus; ro_number: string } | null = null
+  if (waiting) {
+    const { data, error: readError } = await client
+      .from('repair_orders')
+      .select('status, ro_number')
+      .eq('id', id)
+      .single()
+    throwIfError(readError, 'Failed to load repair order')
+    previous = data as { status: RepairOrderStatus; ro_number: string }
+  }
   const { error } = await client.from('repair_orders').update({ status }).eq('id', id)
   throwIfError(error, 'Failed to update repair order status')
+  if (previous && previous.status !== status) {
+    await notify({
+      type: 'order_waiting',
+      title: `${previous.ro_number} is ${REPAIR_ORDER_STATUS_LABELS[status].toLowerCase()}`,
+      body: `Moved from ${REPAIR_ORDER_STATUS_LABELS[previous.status]} to ${REPAIR_ORDER_STATUS_LABELS[status]}.`,
+      related_type: 'repair_order',
+      related_id: id,
+    })
+  }
 }
 
 /**
@@ -519,6 +546,35 @@ export async function updateEstimate(id: string, updates: EstimateUpdates): Prom
   if (!data || data.length === 0) {
     throw new Error('The estimate changed while you were editing it. Reload and try again.')
   }
+  if (updates.status !== undefined && updates.status !== current.status) {
+    const event = ESTIMATE_NOTIFICATIONS[updates.status]
+    if (event) {
+      const ro = await roNumberFor(current.repair_order_id)
+      await notify({
+        type: event.type,
+        title: `Estimate ${event.verb} — ${ro}`,
+        body: `Total ${money(cents(labor + parts + tax))}`,
+        related_type: 'repair_order',
+        related_id: current.repair_order_id,
+      })
+    }
+  }
+}
+
+const ESTIMATE_NOTIFICATIONS: Partial<
+  Record<EstimateStatus, { type: NotificationType; verb: string }>
+> = {
+  sent: { type: 'estimate_sent', verb: 'sent' },
+  approved: { type: 'estimate_approved', verb: 'approved' },
+  declined: { type: 'estimate_declined', verb: 'declined' },
+}
+
+const INVOICE_NOTIFICATIONS: Partial<
+  Record<InvoiceStatus, { type: NotificationType; verb: string }>
+> = {
+  sent: { type: 'invoice_sent', verb: 'sent' },
+  paid: { type: 'invoice_paid', verb: 'paid' },
+  void: { type: 'invoice_void', verb: 'voided' },
 }
 
 export async function deleteEstimate(id: string): Promise<void> {
@@ -611,6 +667,19 @@ export async function updateInvoice(id: string, updates: InvoiceUpdates): Promis
   if (!data || data.length === 0) {
     throw new Error('The invoice changed while you were editing it. Reload and try again.')
   }
+  if (nextStatus !== current.status) {
+    const event = INVOICE_NOTIFICATIONS[nextStatus]
+    if (event) {
+      const ro = await roNumberFor(current.repair_order_id)
+      await notify({
+        type: event.type,
+        title: `Invoice ${current.invoice_number} ${event.verb} — ${ro}`,
+        body: `Total ${money(cents(subtotal + tax))}`,
+        related_type: 'repair_order',
+        related_id: current.repair_order_id,
+      })
+    }
+  }
 }
 
 export async function deleteInvoice(id: string): Promise<void> {
@@ -700,6 +769,24 @@ async function checkVehicleBelongsToCustomer(
   }
 }
 
+/** A linked repair order must belong to the appointment's customer. */
+async function checkOrderBelongsToCustomer(
+  repairOrderId: string | null,
+  customerId: string,
+): Promise<void> {
+  if (repairOrderId === null) return
+  const client = requireClient()
+  const { data, error } = await client
+    .from('repair_orders')
+    .select('customer_id')
+    .eq('id', repairOrderId)
+    .single()
+  throwIfError(error, 'Failed to load repair order')
+  if ((data as { customer_id: string }).customer_id !== customerId) {
+    throw new Error("That repair order doesn't belong to this customer.")
+  }
+}
+
 export interface NewAppointmentInput {
   customer_id: string
   vehicle_id: string | null
@@ -715,13 +802,26 @@ export async function createAppointment(input: NewAppointmentInput): Promise<App
   if (!input.customer_id) throw new Error('A customer is required.')
   checkAppointmentTimes(input.starts_at, input.ends_at)
   await checkVehicleBelongsToCustomer(input.vehicle_id, input.customer_id)
+  await checkOrderBelongsToCustomer(input.repair_order_id, input.customer_id)
   const { data, error } = await client
     .from('appointments')
     .insert({ ...input, status: 'booked' })
     .select(APPOINTMENT_SELECT)
     .single()
   throwIfError(error, 'Failed to book appointment')
-  return data as Appointment
+  const created = data as Appointment
+  await notify({
+    type: 'appointment_created',
+    title: `Appointment booked — ${created.customers?.name ?? 'customer'}`,
+    body: appointmentSummary(created),
+    related_type: 'appointment',
+    related_id: created.id,
+  })
+  return created
+}
+
+function appointmentSummary(a: Appointment): string {
+  return [formatAppointmentTime(a.starts_at, a.ends_at), a.service].filter(Boolean).join(' · ')
 }
 
 export interface AppointmentUpdates {
@@ -743,7 +843,7 @@ export async function updateAppointment(id: string, updates: AppointmentUpdates)
   const client = requireClient()
   const { data: found, error: findError } = await client
     .from('appointments')
-    .select('*')
+    .select(APPOINTMENT_SELECT)
     .eq('id', id)
     .single()
   throwIfError(findError, 'Failed to load appointment')
@@ -780,6 +880,17 @@ export async function updateAppointment(id: string, updates: AppointmentUpdates)
   if (!data || data.length === 0) {
     throw new Error('The appointment changed while you were editing it. Reload and try again.')
   }
+  if ((status === 'cancelled' || status === 'no_show') && status !== current.status) {
+    await notify({
+      type: 'appointment_cancelled',
+      title: `${status === 'cancelled' ? 'Appointment cancelled' : 'Appointment marked no-show'} — ${
+        current.customers?.name ?? 'customer'
+      }`,
+      body: appointmentSummary(current),
+      related_type: 'appointment',
+      related_id: id,
+    })
+  }
 }
 
 export async function deleteAppointment(id: string): Promise<void> {
@@ -794,6 +905,130 @@ export async function deleteAppointment(id: string): Promise<void> {
   if (!data || data.length === 0) {
     throw new Error('Only a booked or confirmed appointment can be deleted.')
   }
+}
+
+// ---------- Notifications ----------
+// In-app only (no push/email/SMS). Rows are created ONLY by notify(),
+// which is called ONLY from these event sites in this file:
+//   createAppointment (appointment_created), updateAppointment
+//   (appointment_cancelled for cancelled / no_show), updateEstimate
+//   (estimate_sent / _approved / _declined), updateInvoice (invoice_sent /
+//   _paid / _void), updateRepairOrderStatus (order_waiting).
+
+interface NewNotification {
+  type: NotificationType
+  title: string
+  body: string | null
+  related_type: NotificationRelatedType
+  related_id: string
+}
+
+/**
+ * Internal: inserts one notification row. The event's own change is
+ * already saved when this runs, so a failed insert is logged rather than
+ * thrown — a missing notification must not make a saved booking or
+ * payment look like it failed.
+ */
+async function notify(notification: NewNotification): Promise<void> {
+  try {
+    const client = requireClient()
+    const { error } = await client.from('notifications').insert(notification)
+    if (error) console.error(`Failed to create notification: ${error.message}`)
+  } catch (err) {
+    console.error('Failed to create notification:', err)
+  }
+}
+
+/** RO number for notification titles; falls back to a generic label. */
+async function roNumberFor(repairOrderId: string): Promise<string> {
+  const client = requireClient()
+  const { data } = await client
+    .from('repair_orders')
+    .select('ro_number')
+    .eq('id', repairOrderId)
+    .maybeSingle()
+  return (data as { ro_number: string } | null)?.ro_number ?? 'repair order'
+}
+
+/** All notifications: unread first, then newest first. */
+export async function fetchNotifications(): Promise<AppNotification[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('notifications')
+    .select('*')
+    .order('is_read', { ascending: true })
+    .order('created_at', { ascending: false })
+  throwIfError(error, 'Failed to load notifications')
+  return (data ?? []) as AppNotification[]
+}
+
+export async function fetchUnreadNotificationCount(): Promise<number> {
+  const client = requireClient()
+  const { count, error } = await client
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('is_read', false)
+  throwIfError(error, 'Failed to count notifications')
+  return count ?? 0
+}
+
+/** Marks one notification read (keeps the original read_at if already read). */
+export async function markNotificationRead(id: string): Promise<void> {
+  const client = requireClient()
+  const { error } = await client
+    .from('notifications')
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('is_read', false)
+  throwIfError(error, 'Failed to mark notification read')
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  const client = requireClient()
+  const { error } = await client
+    .from('notifications')
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .eq('is_read', false)
+  throwIfError(error, 'Failed to mark notifications read')
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client.from('notifications').delete().eq('id', id).select('id')
+  throwIfError(error, 'Failed to delete notification')
+  if (!data || data.length === 0) throw new Error('That notification was already deleted.')
+}
+
+export interface NotificationTarget {
+  kind: 'repair_order' | 'appointment' | 'customer'
+  id: string
+}
+
+/**
+ * Where a notification should open. Estimates and invoices open their
+ * repair order. Returns null when the related record no longer exists.
+ */
+export async function resolveNotificationTarget(
+  notification: AppNotification,
+): Promise<NotificationTarget | null> {
+  const { related_type: type, related_id: id } = notification
+  if (!type || !id) return null
+  const client = requireClient()
+  if (type === 'estimate' || type === 'invoice') {
+    const { data, error } = await client
+      .from(type === 'estimate' ? 'estimates' : 'invoices')
+      .select('repair_order_id')
+      .eq('id', id)
+      .maybeSingle()
+    throwIfError(error, 'Failed to load the related record')
+    const roId = (data as { repair_order_id: string } | null)?.repair_order_id
+    return roId ? { kind: 'repair_order', id: roId } : null
+  }
+  const table =
+    type === 'repair_order' ? 'repair_orders' : type === 'appointment' ? 'appointments' : 'customers'
+  const { data, error } = await client.from(table).select('id').eq('id', id).maybeSingle()
+  throwIfError(error, 'Failed to load the related record')
+  return data ? { kind: type, id } : null
 }
 
 // ---------- Inspections ----------
