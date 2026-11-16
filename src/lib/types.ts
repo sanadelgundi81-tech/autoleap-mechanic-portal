@@ -176,6 +176,26 @@ export interface AppNotification {
   read_at: string | null
 }
 
+/**
+ * A record of time worked on a repair order (not billing).
+ * Mirrors supabase/migrations/20261116020000_timelogs.sql.
+ */
+export interface Timelog {
+  id: string
+  repair_order_id: string
+  started_at: string
+  /** Null while the timer is still running. */
+  ended_at: string | null
+  note: string | null
+  created_at: string
+  /** Joined for display by fetchTimelogs. */
+  repair_orders?: {
+    id: string
+    ro_number: string
+    customers?: { id: string; name: string } | null
+  } | null
+}
+
 export interface Customer {
   id: string
   name: string

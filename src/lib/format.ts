@@ -86,6 +86,49 @@ export function fromDateTimeLocalValue(value: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
+/**
+ * Whole minutes between start and end; a running timelog (no end)
+ * counts up to `now`. Never negative.
+ */
+export function timelogMinutes(
+  startedAt: string,
+  endedAt: string | null,
+  now: number = Date.now(),
+): number {
+  const end = endedAt ? new Date(endedAt).getTime() : now
+  return Math.max(0, Math.floor((end - new Date(startedAt).getTime()) / 60000))
+}
+
+/** Minutes as "45 min" or "2 h 05 min". */
+export function formatDuration(minutes: number): string {
+  const m = Math.max(0, Math.floor(minutes))
+  if (m < 60) return `${m} min`
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`
+}
+
+/** Timelog range in local time, e.g. "Nov 16, 9:00 AM – 10:30 AM" or "… – running". */
+export function formatTimelogRange(startedAt: string, endedAt: string | null): string {
+  const start = new Date(startedAt)
+  const startText = start.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+  if (!endedAt) return `${startText} – running`
+  const end = new Date(endedAt)
+  const endText =
+    end.toDateString() === start.toDateString()
+      ? end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      : end.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+  return `${startText} – ${endText}`
+}
+
 export function formatKm(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—'
   return `${Number(value).toLocaleString('en-US')} km`

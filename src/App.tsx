@@ -10,6 +10,7 @@ import { InspectionPage } from './pages/InspectionPage'
 import { Customers } from './pages/Customers'
 import { Appointments } from './pages/Appointments'
 import { Notifications } from './pages/Notifications'
+import { Timelogs } from './pages/Timelogs'
 import { fetchUnreadNotificationCount } from './lib/data'
 import { LoadingState } from './components/ui'
 
@@ -109,6 +110,7 @@ function Shell() {
           onNavigate={setView}
         />
       )}
+      {view.name === 'timelogs' && <Timelogs onNavigate={setView} />}
       {view.name === 'notifications' && (
         <Notifications onNavigate={setView} onUnreadChange={refreshUnread} />
       )}

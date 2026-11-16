@@ -1,5 +1,5 @@
 import { requireClient } from './supabase'
-import { formatAppointmentTime, money } from './format'
+import { formatAppointmentTime, money, timelogMinutes } from './format'
 import type {
   AppNotification,
   Appointment,
@@ -25,6 +25,7 @@ import type {
   RepairOrderPriority,
   RepairOrderStatus,
   ServiceCounts,
+  Timelog,
   Vehicle,
 } from './types'
 import {
@@ -163,11 +164,13 @@ export interface RepairOrderDetail {
   inspectionSummary: InspectionSummary
   services: OrderService[]
   appointments: Appointment[]
+  /** This order's timelogs, newest first, with the total logged minutes (reference only). */
+  timelogs: OrderTimelogs
 }
 
 export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDetail> {
   const client = requireClient()
-  const [ro, estimates, invoices, inspection, services, appointments] = await Promise.all([
+  const [ro, estimates, invoices, inspection, services, appointments, timelogs] = await Promise.all([
     client.from('repair_orders').select(RO_SELECT).eq('id', id).single(),
     client
       .from('estimates')
@@ -188,6 +191,7 @@ export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDet
       .maybeSingle(),
     fetchOrderServices(id),
     fetchAppointmentsByRepairOrder(id),
+    fetchTimelogsByRepairOrder(id),
   ])
 
   throwIfError(ro.error, 'Failed to load repair order')
@@ -211,6 +215,7 @@ export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDet
     inspectionSummary,
     services,
     appointments,
+    timelogs,
   }
 }
 
@@ -905,6 +910,144 @@ export async function deleteAppointment(id: string): Promise<void> {
   if (!data || data.length === 0) {
     throw new Error('Only a booked or confirmed appointment can be deleted.')
   }
+}
+
+// ---------- Timelogs ----------
+// A RECORD of time worked on a repair order — not billing. Nothing here
+// writes labor_hours or any money total, and nothing here calls notify().
+// ended_at null = running; at most one running timelog per order (the
+// partial unique index is the database backstop).
+
+const TIMELOG_SELECT = '*, repair_orders(id, ro_number, customers(id, name))'
+const UNIQUE_VIOLATION = '23505'
+const RUNNING_EXISTS = 'This order already has a running timelog. Stop it before starting another.'
+
+export interface OrderTimelogs {
+  timelogs: Timelog[]
+  /** Total logged minutes for the order (a running timelog counts up to now). For reference only. */
+  totalMinutes: number
+}
+
+/** One order's timelogs, newest first, with the total logged minutes. */
+export async function fetchTimelogsByRepairOrder(repairOrderId: string): Promise<OrderTimelogs> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('timelogs')
+    .select('*')
+    .eq('repair_order_id', repairOrderId)
+    .order('started_at', { ascending: false })
+  throwIfError(error, 'Failed to load timelogs')
+  const timelogs = (data ?? []) as Timelog[]
+  const now = Date.now()
+  return {
+    timelogs,
+    totalMinutes: timelogs.reduce((sum, t) => sum + timelogMinutes(t.started_at, t.ended_at, now), 0),
+  }
+}
+
+/** All timelogs, newest first, with order number and customer name joined. */
+export async function fetchTimelogs(): Promise<Timelog[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('timelogs')
+    .select(TIMELOG_SELECT)
+    .order('started_at', { ascending: false })
+  throwIfError(error, 'Failed to load timelogs')
+  return (data ?? []) as Timelog[]
+}
+
+function cleanNote(note: string | null | undefined): string | null {
+  const trimmed = (note ?? '').trim()
+  return trimmed === '' ? null : trimmed
+}
+
+/** Starts the order's timer (ended_at null). Only one may run per order. */
+export async function startTimelog(repairOrderId: string, note?: string | null): Promise<Timelog> {
+  const client = requireClient()
+  const { data: running, error: runningError } = await client
+    .from('timelogs')
+    .select('id')
+    .eq('repair_order_id', repairOrderId)
+    .is('ended_at', null)
+    .limit(1)
+  throwIfError(runningError, 'Failed to check running timelogs')
+  if (running && running.length > 0) throw new Error(RUNNING_EXISTS)
+  const { data, error } = await client
+    .from('timelogs')
+    .insert({
+      repair_order_id: repairOrderId,
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      note: cleanNote(note),
+    })
+    .select('*')
+    .single()
+  // Two starts at the same moment: the database index refuses the second.
+  if (error && (error as { code?: string }).code === UNIQUE_VIOLATION) throw new Error(RUNNING_EXISTS)
+  throwIfError(error, 'Failed to start timelog')
+  return data as Timelog
+}
+
+/** Stops a running timelog (ended_at = now). Fails if already stopped. */
+export async function stopTimelog(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('timelogs')
+    .update({ ended_at: new Date().toISOString() })
+    .eq('id', id)
+    .is('ended_at', null)
+    .select('id')
+  throwIfError(error, 'Failed to stop timelog')
+  if (!data || data.length === 0) {
+    throw new Error('That timelog is already stopped (or was deleted).')
+  }
+}
+
+/** Manual entry for time worked but not clocked. ended_at is required and must be after started_at. */
+export async function addTimelog(
+  repairOrderId: string,
+  startedAt: string,
+  endedAt: string,
+  note?: string | null,
+): Promise<Timelog> {
+  const client = requireClient()
+  if (!repairOrderId) throw new Error('A repair order is required.')
+  const start = new Date(startedAt).getTime()
+  const end = new Date(endedAt).getTime()
+  if (Number.isNaN(start)) throw new Error('A valid start time is required.')
+  if (Number.isNaN(end)) throw new Error('A valid end time is required.')
+  if (end <= start) throw new Error('The end time must be after the start time.')
+  const { data, error } = await client
+    .from('timelogs')
+    .insert({
+      repair_order_id: repairOrderId,
+      started_at: new Date(start).toISOString(),
+      ended_at: new Date(end).toISOString(),
+      note: cleanNote(note),
+    })
+    .select('*')
+    .single()
+  throwIfError(error, 'Failed to add timelog')
+  return data as Timelog
+}
+
+/** Only the note can change: times are fixed once recorded (delete and re-add to fix a time). */
+export async function updateTimelog(id: string, updates: { note: string | null }): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('timelogs')
+    .update({ note: cleanNote(updates.note) })
+    .eq('id', id)
+    .select('id')
+  throwIfError(error, 'Failed to update timelog')
+  if (!data || data.length === 0) throw new Error('That timelog no longer exists.')
+}
+
+export async function deleteTimelog(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client.from('timelogs').delete().eq('id', id).select('id')
+  throwIfError(error, 'Failed to delete timelog')
+  if (!data || data.length === 0) throw new Error('That timelog was already deleted.')
 }
 
 // ---------- Notifications ----------
