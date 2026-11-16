@@ -82,9 +82,12 @@ function startOfToday(): number {
 
 export function Appointments({
   prefill,
+  focusAppointmentId,
   onNavigate,
 }: {
   prefill?: AppointmentPrefill
+  /** Opened from a notification: scroll to and highlight this appointment. */
+  focusAppointmentId?: string
   onNavigate: (view: View) => void
 }) {
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -132,6 +135,13 @@ export function Appointments({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (loading || !focusAppointmentId) return
+    document
+      .getElementById(`appointment-${focusAppointmentId}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [loading, focusAppointmentId])
 
   // Upcoming = today and later, earliest first; past = before today, most recent first.
   const { upcoming, past } = useMemo(() => {
@@ -283,7 +293,13 @@ export function Appointments({
     }
     const editable = APPOINTMENT_EDITABLE_STATUSES.includes(a.status)
     return (
-      <div key={a.id} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <div
+        key={a.id}
+        id={`appointment-${a.id}`}
+        className={`rounded-xl border border-slate-800 bg-slate-900 p-4 ${
+          a.id === focusAppointmentId ? 'ring-2 ring-blue-500' : ''
+        }`}
+      >
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <p className="font-semibold text-white">{formatAppointmentTime(a.starts_at, a.ends_at)}</p>

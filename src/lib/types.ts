@@ -144,6 +144,38 @@ export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
   no_show: 'No-show',
 }
 
+/** Every event that creates a notification. Nothing else does. */
+export type NotificationType =
+  | 'appointment_created'
+  | 'appointment_cancelled'
+  | 'estimate_sent'
+  | 'estimate_approved'
+  | 'estimate_declined'
+  | 'invoice_sent'
+  | 'invoice_paid'
+  | 'invoice_void'
+  | 'order_waiting'
+
+export type NotificationRelatedType =
+  | 'repair_order'
+  | 'appointment'
+  | 'customer'
+  | 'estimate'
+  | 'invoice'
+
+/** Mirrors supabase/migrations/20261116010000_notifications.sql. */
+export interface AppNotification {
+  id: string
+  created_at: string
+  type: NotificationType
+  title: string
+  body: string | null
+  related_type: NotificationRelatedType | null
+  related_id: string | null
+  is_read: boolean
+  read_at: string | null
+}
+
 export interface Customer {
   id: string
   name: string

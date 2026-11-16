@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { isSupabaseConfigured } from './lib/supabase'
 import { Layout, type View } from './components/Layout'
@@ -9,6 +9,8 @@ import { RepairOrderDetailPage } from './pages/RepairOrderDetail'
 import { InspectionPage } from './pages/InspectionPage'
 import { Customers } from './pages/Customers'
 import { Appointments } from './pages/Appointments'
+import { Notifications } from './pages/Notifications'
+import { fetchUnreadNotificationCount } from './lib/data'
 import { LoadingState } from './components/ui'
 
 function SetupNotice() {
@@ -58,6 +60,21 @@ function SetupNotice() {
 function Shell() {
   const { user, loading } = useAuth()
   const [view, setView] = useState<View>({ name: 'dashboard' })
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  // Unread badge: fetched when the app loads (sign-in), on each navigation,
+  // and whenever the Notifications page reports a change. No timer polling.
+  const refreshUnread = useCallback(async () => {
+    try {
+      setUnreadCount(await fetchUnreadNotificationCount())
+    } catch {
+      // The badge is a convenience; the Notifications page shows real errors.
+    }
+  }, [])
+
+  useEffect(() => {
+    if (user) void refreshUnread()
+  }, [user, view, refreshUnread])
 
   if (loading) {
     return (
@@ -70,7 +87,7 @@ function Shell() {
   if (!user) return <Login />
 
   return (
-    <Layout view={view} onNavigate={setView}>
+    <Layout view={view} onNavigate={setView} unreadCount={unreadCount}>
       {view.name === 'dashboard' && <Dashboard onNavigate={setView} />}
       {view.name === 'repair-orders' && <RepairOrders onNavigate={setView} />}
       {view.name === 'repair-order' && (
@@ -86,10 +103,14 @@ function Shell() {
       {view.name === 'appointments' && (
         // key: a new prefill (from an order) remounts the page so its form opens prefilled.
         <Appointments
-          key={view.prefill?.repairOrderId ?? 'all'}
+          key={view.prefill?.repairOrderId ?? view.focusAppointmentId ?? 'all'}
           prefill={view.prefill}
+          focusAppointmentId={view.focusAppointmentId}
           onNavigate={setView}
         />
+      )}
+      {view.name === 'notifications' && (
+        <Notifications onNavigate={setView} onUnreadChange={refreshUnread} />
       )}
       {view.name === 'customers' && <Customers focusCustomerId={view.focusCustomerId} />}
     </Layout>

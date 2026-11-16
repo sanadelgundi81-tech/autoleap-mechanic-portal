@@ -14,23 +14,40 @@ export type View =
   | { name: 'repair-orders' }
   | { name: 'repair-order'; id: string }
   | { name: 'inspection'; inspectionId: string; repairOrderId: string }
-  | { name: 'appointments'; prefill?: AppointmentPrefill }
+  | { name: 'appointments'; prefill?: AppointmentPrefill; focusAppointmentId?: string }
+  | { name: 'notifications' }
   | { name: 'customers'; focusCustomerId?: string }
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'dashboard', label: 'Dashboard' },
   { name: 'repair-orders', label: 'Repair Orders' },
   { name: 'appointments', label: 'Appointments' },
+  { name: 'notifications', label: 'Notifications' },
   { name: 'customers', label: 'Customers' },
 ]
+
+/** Unread count shown next to Notifications in both navs. */
+function UnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span
+      className="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-blue-500 px-1.5 text-[0.7rem] font-bold leading-5 text-white"
+      aria-label={`${count} unread`}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
 
 export function Layout({
   view,
   onNavigate,
+  unreadCount,
   children,
 }: {
   view: View
   onNavigate: (view: View) => void
+  unreadCount: number
   children: ReactNode
 }) {
   const { user, signOut } = useAuth()
@@ -80,6 +97,7 @@ export function Layout({
                 }`}
               >
                 {item.label}
+                {item.name === 'notifications' && <UnreadBadge count={unreadCount} />}
               </button>
             )
           })}
@@ -100,6 +118,7 @@ export function Layout({
               className={`font-semibold ${active ? 'text-blue-400' : 'text-slate-300'}`}
             >
               {item.label}
+              {item.name === 'notifications' && <UnreadBadge count={unreadCount} />}
             </button>
           )
         })}
