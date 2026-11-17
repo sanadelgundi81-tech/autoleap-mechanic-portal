@@ -171,6 +171,8 @@ are:
   - Honda + "Civic" shows the Honda bulletin, which has no model, so it applies to every Honda.
   - **Exact make match:** "toy" shows only the no-make guides (not Toyota), "  TOYOTA  " matches Toyota, and "Ford Motor" does not match Ford.
   - "tesla" shows only the no-make guides.
+  - The filter also works inside a single tab.
+  - A model with no make doesn't filter (the page disables the model input until a make is typed).
 - **Year filter** (ranges: Camry 2018–2022, Ford 2015+, Honda up to 2019, the other two none):
   - **2020** shows Camry, Ford and the 2 no-year guides; the Honda bulletin is hidden.
   - **2018** shows all 5, and **2022** still shows Camry: range ends are included.
@@ -179,8 +181,6 @@ are:
   - Inside a tab: Bulletins is empty for 2020.
   - A guide with no make but "2020 and later" is hidden for 2019 and shown for 2020, and the year still applies to it under a make filter.
   - `parseFilterYear`: "2018" and " 2018 " filter; "", "20", "201", "abcd", "20188" and "2018.5" don't.
-  - The filter also works inside a single tab.
-  - A model with no make doesn't filter (the page disables the model input until a make is typed).
 
 **Validation:** each case is refused with its reason, on both **create and edit**:
 
