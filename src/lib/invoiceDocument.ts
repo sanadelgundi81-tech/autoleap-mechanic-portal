@@ -122,20 +122,65 @@ export function invoiceEmailLink(doc: InvoiceDocument): SendLink {
   return { href: `mailto:${email}?subject=${subject}&body=${body}`, reason: null }
 }
 
-/**
- * The stored phone as wa.me wants it: spaces, dashes, brackets and a leading
- * "+" removed. No country code is guessed. Null when anything else is left.
- */
-export function whatsAppDigits(phone: string | null): string | null {
-  if (!phone) return null
-  const digits = phone.trim().replace(/^\+/, '').replace(/[\s\-()[\]]/g, '')
-  return /^\d+$/.test(digits) ? digits : null
+export interface WhatsAppNumber {
+  /** Digits as wa.me wants them: country code first, no "+". */
+  digits: string
+  /** The stored number already carried its country code ("+…" or "00…"). */
+  international: boolean
+  /** The shop's default country code was put in front. */
+  codeAdded: boolean
 }
 
-/** wa.me link to the customer's stored phone; disabled with a reason when there is none. */
-export function invoiceWhatsAppLink(doc: InvoiceDocument): SendLink {
+/**
+ * How a stored phone becomes a wa.me number. Spaces, dashes and brackets are
+ * removed first. Then:
+ * - "+44 …" or "0044 …" already has its country code: used as is (without + / 00).
+ * - Otherwise, with a default country code set: one leading 0 (the trunk
+ *   prefix) is dropped and the code is put in front: "020 7946 0018" + 44 →
+ *   442079460018.
+ * - Otherwise (no default set): the digits exactly as stored.
+ * Null when anything other than digits is left (e.g. "ext 2").
+ */
+export function resolveWhatsAppNumber(
+  phone: string | null,
+  defaultCountryCode: string | null = null,
+): WhatsAppNumber | null {
+  if (!phone) return null
+  const cleaned = phone.trim().replace(/[\s\-()[\]]/g, '')
+  let digits = cleaned
+  let international = false
+  if (cleaned.startsWith('+')) {
+    digits = cleaned.slice(1)
+    international = true
+  } else if (cleaned.startsWith('00')) {
+    digits = cleaned.slice(2)
+    international = true
+  }
+  if (!/^\d+$/.test(digits)) return null
+  if (!international && defaultCountryCode) {
+    return { digits: defaultCountryCode + digits.replace(/^0/, ''), international, codeAdded: true }
+  }
+  return { digits, international, codeAdded: false }
+}
+
+/** Just the digits of resolveWhatsAppNumber. */
+export function whatsAppDigits(
+  phone: string | null,
+  defaultCountryCode: string | null = null,
+): string | null {
+  return resolveWhatsAppNumber(phone, defaultCountryCode)?.digits ?? null
+}
+
+/**
+ * wa.me link to the customer's stored phone, using the shop's default country
+ * code when the phone has none. Disabled with a reason when there is no phone.
+ */
+export function invoiceWhatsAppLink(
+  doc: InvoiceDocument,
+  defaultCountryCode: string | null = null,
+): SendLink {
   if (!doc.customer.phone) return { href: null, reason: 'No phone on file for this customer.' }
-  const digits = whatsAppDigits(doc.customer.phone)
+  const digits = whatsAppDigits(doc.customer.phone, defaultCountryCode)
   if (!digits) {
     return {
       href: null,

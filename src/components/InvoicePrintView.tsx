@@ -1,14 +1,48 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { fetchShopSettings, updateWhatsAppCountryCode } from '../lib/data'
 import { money } from '../lib/format'
 import {
   buildInvoiceDocument,
   invoiceEmailLink,
   invoiceWhatsAppLink,
-  whatsAppDigits,
+  resolveWhatsAppNumber,
   type SendLink,
 } from '../lib/invoiceDocument'
 import type { Invoice, RepairOrder } from '../lib/types'
+
+type CountryCodeState =
+  | { status: 'loading' }
+  | { status: 'ready'; code: string | null; save: (value: string) => Promise<void> }
+  | { status: 'error'; message: string }
+
+/**
+ * The shop's default WhatsApp country code (shop_settings). If it can't be
+ * loaded (e.g. the migration isn't applied yet), phones are used as stored
+ * and the invoice view keeps working.
+ */
+function useCountryCodeSetting(): CountryCodeState {
+  const [state, setState] = useState<{ status: 'loading' } | { status: 'ready'; code: string | null } | { status: 'error'; message: string }>({ status: 'loading' })
+  useEffect(() => {
+    let cancelled = false
+    fetchShopSettings().then(
+      (s) => !cancelled && setState({ status: 'ready', code: s.whatsapp_country_code }),
+      (err: unknown) =>
+        !cancelled && setState({ status: 'error', message: err instanceof Error ? err.message : String(err) }),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  if (state.status !== 'ready') return state
+  return {
+    ...state,
+    save: async (value: string) => {
+      const saved = await updateWhatsAppCountryCode(value)
+      setState({ status: 'ready', code: saved.whatsapp_country_code })
+    },
+  }
+}
 
 /** Class on <html> while the view is open; the print stylesheet keys off it. */
 export const PRINT_OPEN_CLASS = 'invoice-print-open'
@@ -29,8 +63,13 @@ export function InvoicePrintView({
 }) {
   const doc = buildInvoiceDocument(repairOrder, invoice)
   const email = invoiceEmailLink(doc)
-  const whatsApp = invoiceWhatsAppLink(doc)
-  const digits = whatsAppDigits(doc.customer.phone)
+  const settings = useCountryCodeSetting()
+  const code = settings.status === 'ready' ? settings.code : null
+  const whatsApp: SendLink =
+    settings.status === 'loading'
+      ? { href: null, reason: 'Loading the default country code…' }
+      : invoiceWhatsAppLink(doc, code)
+  const number = resolveWhatsAppNumber(doc.customer.phone, code)
 
   // Kept in a ref so a parent re-render never re-runs the effect (and re-prints).
   const closeRef = useRef(onClose)
@@ -70,11 +109,16 @@ export function InvoicePrintView({
         </div>
         {email.reason && <p className="text-xs text-amber-300">Email: {email.reason}</p>}
         {whatsApp.reason && <p className="text-xs text-amber-300">WhatsApp: {whatsApp.reason}</p>}
-        {digits && (
+        {number && settings.status !== 'loading' && (
           <p className="text-xs text-slate-400">
-            WhatsApp opens to {digits}, exactly as stored. It must include the country code.
+            {number.international
+              ? `WhatsApp opens to ${number.digits}, using the country code stored with the number.`
+              : number.codeAdded
+                ? `WhatsApp opens to ${number.digits}: the default +${code} was added to the stored ${doc.customer.phone}.`
+                : `WhatsApp opens to ${number.digits}, exactly as stored. If stored numbers don't include a country code, set a default below.`}
           </p>
         )}
+        <CountryCodeSetting settings={settings} />
         <p className="text-xs text-slate-400">
           The app doesn't attach the PDF: print this invoice to PDF first, then attach it to the
           email or WhatsApp message before sending.
@@ -197,6 +241,74 @@ function ToolbarButton({
     <button type="button" onClick={onClick} className={primary ? PRIMARY : SECONDARY}>
       {children}
     </button>
+  )
+}
+
+/** Shop-wide setting, saved to the database: every device uses the same code. */
+function CountryCodeSetting({ settings }: { settings: CountryCodeState }) {
+  const current = settings.status === 'ready' ? settings.code : null
+  const [value, setValue] = useState(current ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  // Fill the box once the stored code has loaded.
+  useEffect(() => {
+    setValue(current ?? '')
+  }, [current])
+
+  if (settings.status === 'loading') return null
+  if (settings.status === 'error') {
+    return (
+      <p className="text-xs text-amber-300">
+        The default WhatsApp country code isn't available ({settings.message}). Phones are used
+        exactly as stored.
+      </p>
+    )
+  }
+
+  async function handleSave(event: FormEvent) {
+    event.preventDefault()
+    if (settings.status !== 'ready') return
+    setError(null)
+    setSaved(false)
+    setSaving(true)
+    try {
+      await settings.save(value)
+      setSaved(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void handleSave(e)} className="flex flex-wrap items-center gap-2 text-xs">
+      <label className="flex items-center gap-1 text-slate-300">
+        Default WhatsApp country code: +
+        <input
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value)
+            setSaved(false)
+          }}
+          inputMode="numeric"
+          maxLength={4}
+          placeholder="none"
+          aria-label="Default WhatsApp country code"
+          className="w-16 rounded border border-slate-700 bg-slate-800 px-2 py-1 text-white focus:border-blue-500 focus:outline-none"
+        />
+      </label>
+      <button type="submit" disabled={saving || value.trim() === (current ?? '')} className={SECONDARY}>
+        {saving ? 'Saving…' : 'Save'}
+      </button>
+      <span className="text-slate-500">
+        Used for numbers stored without +/00. Leave blank to use numbers as stored.
+      </span>
+      {saved && <span className="text-emerald-400">Saved for all devices.</span>}
+      {error && <span className="text-rose-300">{error}</span>}
+    </form>
   )
 }
 
