@@ -19,6 +19,7 @@ export type View =
   | { name: 'timelogs' }
   | { name: 'earnings' }
   | { name: 'customers'; focusCustomerId?: string }
+  | { name: 'import' }
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'dashboard', label: 'Dashboard' },
@@ -28,6 +29,7 @@ const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'timelogs', label: 'Timelogs' },
   { name: 'earnings', label: 'Earnings' },
   { name: 'customers', label: 'Customers' },
+  { name: 'import', label: 'Import' },
 ]
 
 /** Unread count shown next to Notifications in both navs. */
@@ -110,7 +112,7 @@ export function Layout({
         <main className="flex-1 p-6 pb-20 md:pb-6">{children}</main>
       </div>
 
-      {/* Seven items: keep them on one line and let the bar scroll sideways on narrow phones. */}
+      {/* Eight items: keep them on one line and let the bar scroll sideways on narrow phones. */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between gap-4 overflow-x-auto whitespace-nowrap border-t border-slate-800 bg-slate-900 px-4 py-2.5 text-xs md:hidden">
         {NAV_ITEMS.map((item) => {
           const active =
