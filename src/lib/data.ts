@@ -54,7 +54,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
       .from('repair_orders')
       .select('id', { count: 'exact', head: true })
       .is('technician_completed_at', null),
-    client.from('invoices').select('total').eq('status', 'paid'),
+    client.from('invoices').select('total').eq('status', 'paid').not('paid_at', 'is', null),
     client.from('repair_orders').select('labor_hours'),
     client
       .from('inspection_results')
