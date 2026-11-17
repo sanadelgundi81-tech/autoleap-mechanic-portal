@@ -17,6 +17,10 @@ import { LoadingState } from './components/ui'
 
 // The Import page is used rarely; its code loads only when it is opened.
 const Import = lazy(() => import('./pages/Import').then((m) => ({ default: m.Import })))
+// Repair Guides loads the same way, keeping the main bundle under 500 kB.
+const RepairGuides = lazy(() =>
+  import('./pages/RepairGuides').then((m) => ({ default: m.RepairGuides })),
+)
 
 function SetupNotice() {
   return (
@@ -123,6 +127,11 @@ function Shell() {
       {view.name === 'import' && (
         <Suspense fallback={<LoadingState message="Loading import…" />}>
           <Import />
+        </Suspense>
+      )}
+      {view.name === 'guides' && (
+        <Suspense fallback={<LoadingState message="Loading repair guides…" />}>
+          <RepairGuides />
         </Suspense>
       )}
     </Layout>
