@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { isSupabaseConfigured } from './lib/supabase'
 import { Layout, type View } from './components/Layout'
@@ -14,6 +14,9 @@ import { Timelogs } from './pages/Timelogs'
 import { Earnings } from './pages/Earnings'
 import { fetchUnreadNotificationCount } from './lib/data'
 import { LoadingState } from './components/ui'
+
+// The Import page is used rarely; its code loads only when it is opened.
+const Import = lazy(() => import('./pages/Import').then((m) => ({ default: m.Import })))
 
 function SetupNotice() {
   return (
@@ -117,6 +120,11 @@ function Shell() {
         <Notifications onNavigate={setView} onUnreadChange={refreshUnread} />
       )}
       {view.name === 'customers' && <Customers focusCustomerId={view.focusCustomerId} />}
+      {view.name === 'import' && (
+        <Suspense fallback={<LoadingState message="Loading import…" />}>
+          <Import />
+        </Suspense>
+      )}
     </Layout>
   )
 }
