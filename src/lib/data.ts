@@ -23,6 +23,8 @@ import type {
   NotificationType,
   OrderService,
   PaidInvoiceRow,
+  RepairGuide,
+  RepairGuideCategory,
   RepairOrder,
   RepairOrderPriority,
   RepairOrderStatus,
@@ -35,6 +37,7 @@ import {
   APPOINTMENT_STATUS_TRANSITIONS,
   ESTIMATE_STATUS_TRANSITIONS,
   INVOICE_STATUS_TRANSITIONS,
+  REPAIR_GUIDE_CATEGORIES,
   REPAIR_ORDER_STATUS_LABELS,
 } from './types'
 
@@ -1583,4 +1586,150 @@ export async function createVehicle(input: NewVehicleInput): Promise<Vehicle> {
     .single()
   throwIfError(error, 'Failed to add vehicle')
   return data as Vehicle
+}
+
+// ---------- Repair guides ----------
+// The shop's own reference library. Every guide is typed in by the shop:
+// nothing is fetched from an outside source and nothing is seeded.
+// A guide with no make applies to every vehicle.
+
+export interface RepairGuideInput {
+  title: string
+  category: RepairGuideCategory
+  content: string
+  vehicle_make: string | null
+  vehicle_model: string | null
+  /** Null = not set. NaN or a fraction (from an unparseable form value) is refused. */
+  year_from: number | null
+  year_to: number | null
+}
+
+type RepairGuideRow = Omit<RepairGuide, 'id' | 'created_at' | 'updated_at'>
+
+function cleanText(value: string | null | undefined): string | null {
+  const trimmed = (value ?? '').trim()
+  return trimmed === '' ? null : trimmed
+}
+
+/**
+ * Checks a guide before it is saved and returns the cleaned row.
+ * Throws with the reason (shown on the form) — nothing is saved on failure.
+ * Years must be whole numbers from 1900 to next year; year to may not be
+ * before year from.
+ */
+export function validateRepairGuide(input: RepairGuideInput, now: Date = new Date()): RepairGuideRow {
+  const title = cleanText(input.title)
+  const content = cleanText(input.content)
+  if (!title) throw new Error('A title is required.')
+  if (!REPAIR_GUIDE_CATEGORIES.includes(input.category)) throw new Error('Pick a category.')
+  if (!content) throw new Error('The guide content is required.')
+  const maxYear = now.getFullYear() + 1
+  const checkYear = (value: number | null, label: string) => {
+    if (value === null) return
+    if (!Number.isInteger(value)) throw new Error(`${label} must be a whole year, like 2018.`)
+    if (value < 1900 || value > maxYear) throw new Error(`${label} must be between 1900 and ${maxYear}.`)
+  }
+  checkYear(input.year_from, 'Year from')
+  checkYear(input.year_to, 'Year to')
+  if (input.year_from !== null && input.year_to !== null && input.year_to < input.year_from) {
+    throw new Error('Year to cannot be before year from.')
+  }
+  return {
+    title,
+    category: input.category,
+    content,
+    vehicle_make: cleanText(input.vehicle_make),
+    vehicle_model: cleanText(input.vehicle_model),
+    year_from: input.year_from,
+    year_to: input.year_to,
+  }
+}
+
+/** All guides, by title. The page splits them into tabs. */
+export async function fetchRepairGuides(): Promise<RepairGuide[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('repair_guides')
+    .select('*')
+    .order('title', { ascending: true })
+  throwIfError(error, 'Failed to load repair guides')
+  return (data ?? []) as RepairGuide[]
+}
+
+export async function createRepairGuide(input: RepairGuideInput): Promise<RepairGuide> {
+  const row = validateRepairGuide(input)
+  const client = requireClient()
+  const { data, error } = await client.from('repair_guides').insert(row).select('*').single()
+  throwIfError(error, 'Failed to save repair guide')
+  return data as RepairGuide
+}
+
+export async function updateRepairGuide(id: string, input: RepairGuideInput): Promise<RepairGuide> {
+  const row = validateRepairGuide(input)
+  const client = requireClient()
+  const { data, error } = await client.from('repair_guides').update(row).eq('id', id).select('*')
+  throwIfError(error, 'Failed to update repair guide')
+  if (!data || data.length === 0) throw new Error('That guide no longer exists.')
+  return data[0] as RepairGuide
+}
+
+/** Deletes this one guide only. */
+export async function deleteRepairGuide(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client.from('repair_guides').delete().eq('id', id).select('id')
+  throwIfError(error, 'Failed to delete repair guide')
+  if (!data || data.length === 0) throw new Error('That guide was already deleted.')
+}
+
+export interface RepairGuideFilter {
+  category?: RepairGuideCategory
+  /** Matches title or content, case-insensitive. */
+  search?: string
+  /** Vehicle the guides should apply to. Guides with no make always match. */
+  make?: string
+  model?: string
+  /** Model year the guides should apply to. Guides with no year range always match. */
+  year?: number | null
+}
+
+/**
+ * The year filter box: only a complete 4-digit year filters. Anything else
+ * (empty, or "20" while still typing) means no year filter.
+ */
+export function parseFilterYear(text: string): number | null {
+  const trimmed = text.trim()
+  return /^\d{4}$/.test(trimmed) ? Number(trimmed) : null
+}
+
+/**
+ * Filters guides in the browser (the library is one shop's own notes).
+ * Make/model: a guide with no make applies to everything. A guide with a
+ * make matches only when its make equals the typed make. If a model is typed
+ * too and the guide has a model, the guide's model must equal it (a guide
+ * with a make but no model applies to every model of that make). Both are
+ * exact matches, trimmed and case-insensitive.
+ * Year: a guide matches when the year is inside its range. A missing year
+ * from / year to leaves that end open; a guide with neither applies to every
+ * year. The year filter works on its own, with or without a make.
+ */
+export function filterRepairGuides(guides: RepairGuide[], filter: RepairGuideFilter): RepairGuide[] {
+  const search = (filter.search ?? '').trim().toLowerCase()
+  const make = (filter.make ?? '').trim().toLowerCase()
+  const model = (filter.model ?? '').trim().toLowerCase()
+  const year = filter.year ?? null
+  return guides.filter((g) => {
+    if (filter.category && g.category !== filter.category) return false
+    if (search && !g.title.toLowerCase().includes(search) && !g.content.toLowerCase().includes(search)) {
+      return false
+    }
+    if (make && g.vehicle_make) {
+      if (g.vehicle_make.trim().toLowerCase() !== make) return false
+      if (model && g.vehicle_model && g.vehicle_model.trim().toLowerCase() !== model) return false
+    }
+    if (year !== null) {
+      if (g.year_from !== null && year < g.year_from) return false
+      if (g.year_to !== null && year > g.year_to) return false
+    }
+    return true
+  })
 }

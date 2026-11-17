@@ -411,6 +411,43 @@ export interface OrderService {
   updated_at: string
 }
 
+export type RepairGuideCategory = 'procedure' | 'spec' | 'wiring' | 'bulletin'
+
+export const REPAIR_GUIDE_CATEGORIES: RepairGuideCategory[] = ['procedure', 'spec', 'wiring', 'bulletin']
+
+/** Tab labels (plural) and single-guide labels. */
+export const REPAIR_GUIDE_CATEGORY_TABS: Record<RepairGuideCategory, string> = {
+  procedure: 'Procedures',
+  spec: 'Specs',
+  wiring: 'Wiring',
+  bulletin: 'Bulletins',
+}
+
+export const REPAIR_GUIDE_CATEGORY_LABELS: Record<RepairGuideCategory, string> = {
+  procedure: 'Procedure',
+  spec: 'Spec',
+  wiring: 'Wiring',
+  bulletin: 'Bulletin',
+}
+
+/**
+ * A shop-entered reference guide. Mirrors
+ * supabase/migrations/20261116030000_repair_guides.sql.
+ * No make = applies to every vehicle.
+ */
+export interface RepairGuide {
+  id: string
+  title: string
+  category: RepairGuideCategory
+  content: string
+  vehicle_make: string | null
+  vehicle_model: string | null
+  year_from: number | null
+  year_to: number | null
+  created_at: string
+  updated_at: string
+}
+
 /** Service progress for one order: done services / total services. */
 export interface ServiceCounts {
   total: number
