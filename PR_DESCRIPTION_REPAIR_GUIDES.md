@@ -31,7 +31,7 @@ no scraping and no seed content. The table starts empty.
 - **`updated_at` trigger** `set_repair_guides_updated_at`. It reuses the foundation's `public.set_updated_at()`.
 - **RLS on**, with the `authenticated_full_access` policy, word for word as in the timelogs migration.
 - **Index** on `(category, title)`.
-- **Addition (please confirm):** database checks as a backstop for the app's validation:
+- **Database checks** as a backstop for the app's validation (an addition to the spec, confirmed to keep):
   - title and content can't be blank
   - `year_from` and `year_to` must be ≥ 1900
   - `year_to` must be ≥ `year_from` when both are set
@@ -77,8 +77,8 @@ All writes go through these functions. There are no raw inserts anywhere else.
 
 **Make/model rule:**
 - A guide with **no make** always matches.
-- A guide with a make matches when its make contains the typed make, case-insensitive. Typing "toy" finds Toyota.
-- If a model is also typed and the guide has a model, the guide's model must contain it.
+- A guide with a make matches only when its make **equals** the typed make (trimmed, case-insensitive). Typing "toy" does not find Toyota.
+- If a model is also typed and the guide has a model, the guide's model must contain it (partial, case-insensitive — only the make is exact).
 - A guide with a make but **no model** applies to every model of that make.
 
 **Validation:**
@@ -108,7 +108,7 @@ are:
   - RepairGuides is its own chunk, 8.58 kB.
   - Import is unchanged at 13.99 kB.
 
-### Repair guides walkthrough (86/86 checks pass)
+### Repair guides walkthrough (89/89 checks pass)
 **How it was run:**
 - The same harness as the earlier prompts.
 - The project's real `data.ts` was loaded through the project's own Vite and wrote through real supabase-js.
@@ -162,6 +162,7 @@ are:
   - Toyota + "corolla" hides the Camry guide, and the no-make guides still show.
   - TOYOTA + "cam" shows the Camry guide.
   - Honda + "Civic" shows the Honda bulletin, which has no model, so it applies to every Honda.
+  - **Exact make match:** "toy" shows only the no-make guides (not Toyota), "  TOYOTA  " matches Toyota, and "Ford Motor" does not match Ford.
   - "tesla" shows only the no-make guides.
   - The filter also works inside a single tab.
   - A model with no make doesn't filter (the page disables the model input until a make is typed).
@@ -225,12 +226,11 @@ are:
 
 ## Open items
 
-1. **Database checks (addition).** These are the non-blank title and content checks, the ≥ 1900 years and year to ≥ year from. The spec listed only the columns. Please confirm, or I'll drop them.
-2. **The make filter is a "contains" match,** so "toy" finds Toyota. The flip side is that a short make like "Kia" would also match a guide whose make contains "kia". An exact-match option is a one-line change if preferred.
-3. **No year filter.** The filter is make/model only, as specified. The guide's year range is shown but not used to filter. A year box could be added later.
-4. **Content is plain text.** There are no images, PDFs or wiring diagrams as files. Line breaks are kept, and the content box uses a monospace font so pin tables line up. Attachments would need storage, which is out of scope here.
-5. **Filtering happens in the browser** after loading every guide. That's fine for a shop's own library, even a few thousand guides. Nothing was tuned for more.
-6. **Applying the migration** to the live project is a manual step, like the earlier migrations.
+1. **Decided:** the database checks stay, and the make filter is an exact match (trimmed, case-insensitive). A misspelt make in a guide ("Toyta") won't match "Toyota"; the shop fixes it by editing the guide. The model is still a partial match.
+2. **No year filter.** The filter is make/model only, as specified. The guide's year range is shown but not used to filter. A year box could be added later.
+3. **Content is plain text.** There are no images, PDFs or wiring diagrams as files. Line breaks are kept, and the content box uses a monospace font so pin tables line up. Attachments would need storage, which is out of scope here.
+4. **Filtering happens in the browser** after loading every guide. That's fine for a shop's own library, even a few thousand guides. Nothing was tuned for more.
+5. **Applying the migration** to the live project is a manual step, like the earlier migrations.
 
 Not opened as a PR (Muse opens it), not merged, not deployed.
 
