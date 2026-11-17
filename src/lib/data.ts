@@ -1566,26 +1566,157 @@ export interface NewVehicleInput {
   mileage_km: number | null
 }
 
+/** Same rules as edit (validateVehicle): nothing is sent when it throws. */
 export async function createVehicle(input: NewVehicleInput): Promise<Vehicle> {
+  const row = validateVehicle(input)
   const client = requireClient()
   const { data, error } = await client
     .from('vehicles')
-    .insert({
-      customer_id: input.customer_id,
-      year: input.year,
-      make: input.make,
-      model: input.model,
-      trim: input.trim || null,
-      transmission: input.transmission || null,
-      engine: input.engine || null,
-      vin: input.vin || null,
-      license_plate: input.license_plate || null,
-      mileage_km: input.mileage_km,
-    })
+    .insert({ customer_id: input.customer_id, ...row })
     .select('*')
     .single()
   throwIfError(error, 'Failed to add vehicle')
   return data as Vehicle
+}
+
+// ---------- Customer & vehicle edit / delete ----------
+// The foreign keys decide what goes with a delete (foundation migration):
+//   vehicles.customer_id      on delete cascade  → a customer's vehicles go with them
+//   appointments.customer_id  on delete cascade  → so do their appointments
+//   repair_orders.customer_id on delete restrict → a customer with orders can't be deleted
+//   repair_orders.vehicle_id  on delete restrict → a vehicle with orders can't be deleted
+//   appointments.vehicle_id   on delete set null → a deleted vehicle is cleared from appointments
+// The restrict cases are checked here first so the page shows a plain reason,
+// never the database error.
+
+/** Same email shape as the CSV import. */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const FOREIGN_KEY_VIOLATION = '23503'
+const MAX_INT = 2147483647
+
+export const CUSTOMER_HAS_ORDERS = 'This customer has repair orders and cannot be deleted.'
+export const CUSTOMER_VEHICLE_HAS_ORDERS =
+  "One of this customer's vehicles has repair orders, so the customer cannot be deleted."
+export const VEHICLE_HAS_ORDERS = 'This vehicle has repair orders and cannot be deleted.'
+
+export type CustomerInput = NewCustomerInput
+export type VehicleInput = Omit<NewVehicleInput, 'customer_id'>
+
+type CustomerRow = Pick<Customer, 'name' | 'phone' | 'email' | 'notes'>
+type VehicleRow = Omit<Vehicle, 'id' | 'customer_id' | 'created_at' | 'updated_at'>
+
+/**
+ * Checks a customer before it is saved and returns the cleaned row.
+ * Throws with the reason (shown on the form); nothing is saved on failure.
+ */
+export function validateCustomer(input: CustomerInput): CustomerRow {
+  const name = cleanText(input.name)
+  if (!name) throw new Error('A name is required.')
+  const email = cleanText(input.email)
+  if (email && !EMAIL_SHAPE.test(email)) {
+    throw new Error(`"${email}" doesn't look like an email address (like name@example.com).`)
+  }
+  return { name, phone: cleanText(input.phone), email, notes: cleanText(input.notes) }
+}
+
+/**
+ * Checks a vehicle before it is saved and returns the cleaned row.
+ * Make and model are required; year, when set, is a whole year from 1900 to
+ * next year; mileage, when set, is a whole number of 0 or more.
+ */
+export function validateVehicle(input: VehicleInput, now: Date = new Date()): VehicleRow {
+  const make = cleanText(input.make)
+  const model = cleanText(input.model)
+  if (!make) throw new Error('Make is required.')
+  if (!model) throw new Error('Model is required.')
+  const maxYear = now.getFullYear() + 1
+  if (input.year !== null) {
+    if (!Number.isInteger(input.year)) throw new Error('Year must be a whole year, like 2018.')
+    if (input.year < 1900 || input.year > maxYear) {
+      throw new Error(`Year must be between 1900 and ${maxYear}.`)
+    }
+  }
+  if (input.mileage_km !== null) {
+    if (!Number.isInteger(input.mileage_km)) throw new Error('Mileage must be a whole number of km.')
+    if (input.mileage_km < 0) throw new Error('Mileage cannot be negative.')
+    if (input.mileage_km > MAX_INT) throw new Error('Mileage is too large.')
+  }
+  return {
+    year: input.year,
+    make,
+    model,
+    trim: cleanText(input.trim),
+    transmission: cleanText(input.transmission),
+    engine: cleanText(input.engine),
+    vin: cleanText(input.vin),
+    license_plate: cleanText(input.license_plate),
+    mileage_km: input.mileage_km,
+  }
+}
+
+async function countRepairOrders(column: 'customer_id' | 'vehicle_id', ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0
+  const client = requireClient()
+  const { count, error } = await client
+    .from('repair_orders')
+    .select('id', { count: 'exact', head: true })
+    .in(column, ids)
+  throwIfError(error, 'Failed to check repair orders')
+  return count ?? 0
+}
+
+export async function updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
+  const row = validateCustomer(input)
+  const client = requireClient()
+  const { data, error } = await client.from('customers').update(row).eq('id', id).select('*')
+  throwIfError(error, 'Failed to update customer')
+  if (!data || data.length === 0) throw new Error('That customer no longer exists.')
+  return data[0] as Customer
+}
+
+/**
+ * Deletes a customer together with their vehicles and appointments (cascade).
+ * Refused, with nothing deleted, when the customer or any of their vehicles
+ * has repair orders.
+ */
+export async function deleteCustomer(id: string): Promise<void> {
+  if ((await countRepairOrders('customer_id', [id])) > 0) throw new Error(CUSTOMER_HAS_ORDERS)
+  const vehicleIds = (await fetchVehiclesForCustomer(id)).map((v) => v.id)
+  if ((await countRepairOrders('vehicle_id', vehicleIds)) > 0) {
+    throw new Error(CUSTOMER_VEHICLE_HAS_ORDERS)
+  }
+  const client = requireClient()
+  const { data, error } = await client.from('customers').delete().eq('id', id).select('id')
+  // An order added between the check and the delete: the database refuses; show the same reason.
+  if ((error as { code?: string } | null)?.code === FOREIGN_KEY_VIOLATION) {
+    throw new Error(CUSTOMER_HAS_ORDERS)
+  }
+  throwIfError(error, 'Failed to delete customer')
+  if (!data || data.length === 0) throw new Error('That customer was already deleted.')
+}
+
+export async function updateVehicle(id: string, input: VehicleInput): Promise<Vehicle> {
+  const row = validateVehicle(input)
+  const client = requireClient()
+  const { data, error } = await client.from('vehicles').update(row).eq('id', id).select('*')
+  throwIfError(error, 'Failed to update vehicle')
+  if (!data || data.length === 0) throw new Error('That vehicle no longer exists.')
+  return data[0] as Vehicle
+}
+
+/**
+ * Deletes a vehicle. Its appointments stay, with the vehicle cleared (set null).
+ * Refused, with nothing deleted, when the vehicle has repair orders.
+ */
+export async function deleteVehicle(id: string): Promise<void> {
+  if ((await countRepairOrders('vehicle_id', [id])) > 0) throw new Error(VEHICLE_HAS_ORDERS)
+  const client = requireClient()
+  const { data, error } = await client.from('vehicles').delete().eq('id', id).select('id')
+  if ((error as { code?: string } | null)?.code === FOREIGN_KEY_VIOLATION) {
+    throw new Error(VEHICLE_HAS_ORDERS)
+  }
+  throwIfError(error, 'Failed to delete vehicle')
+  if (!data || data.length === 0) throw new Error('That vehicle was already deleted.')
 }
 
 // ---------- Repair guides ----------

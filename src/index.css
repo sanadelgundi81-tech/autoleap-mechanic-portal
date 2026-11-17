@@ -7,3 +7,44 @@ body {
   background-color: #020617;
   color: #f1f5f9;
 }
+
+/*
+ * Printable invoice (src/components/InvoicePrintView.tsx). While it is open,
+ * <html> has .invoice-print-open and the view is a direct child of <body>,
+ * outside #root. On paper only the invoice sheet prints, black on white:
+ * the sidebar, top bar, bottom nav, page and toolbar buttons are all hidden.
+ */
+@media print {
+  @page {
+    margin: 15mm;
+  }
+  html.invoice-print-open,
+  html.invoice-print-open body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  html.invoice-print-open body > *:not(.invoice-print-root) {
+    display: none !important;
+  }
+  .invoice-print-root {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+  .invoice-print-root .no-print {
+    display: none !important;
+  }
+  .invoice-print-sheet {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .invoice-print-sheet * {
+    color: #000 !important;
+  }
+}

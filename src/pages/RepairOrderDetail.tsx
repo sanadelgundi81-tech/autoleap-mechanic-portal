@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { Suspense, lazy, useEffect, useState, type FormEvent } from 'react'
 import {
   createEstimate,
   createInvoice,
@@ -64,6 +64,11 @@ import {
 import type { View } from '../components/Layout'
 
 type DetailTab = 'overview' | 'services'
+
+// Only needed when Print is clicked, so it loads on demand (keeps the main chunk small).
+const InvoicePrintView = lazy(() =>
+  import('../components/InvoicePrintView').then((m) => ({ default: m.InvoicePrintView })),
+)
 
 export function RepairOrderDetailPage({
   id,
@@ -1399,6 +1404,9 @@ function InvoicesCard({
   })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<InvoiceFormValues>(createValues)
+  const [printingId, setPrintingId] = useState<string | null>(null)
+  // Looked up from the latest detail, so the print view always shows the stored values.
+  const printing = detail.invoices.find((inv) => inv.id === printingId) ?? null
 
   function openCreate() {
     if (showCreate) {
@@ -1512,6 +1520,7 @@ function InvoicesCard({
                     : ''}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
+                  <SecondaryButton onClick={() => setPrintingId(inv.id)}>Print</SecondaryButton>
                   {INVOICE_STATUS_TRANSITIONS[inv.status].map((next) => (
                     <SecondaryButton
                       key={next}
@@ -1548,6 +1557,16 @@ function InvoicesCard({
             ),
           )}
         </div>
+      )}
+
+      {printing && (
+        <Suspense fallback={null}>
+          <InvoicePrintView
+            repairOrder={detail.repairOrder}
+            invoice={printing}
+            onClose={() => setPrintingId(null)}
+          />
+        </Suspense>
       )}
     </Card>
   )
