@@ -39,7 +39,8 @@ All writes go through them.
 - **No raw database error reaches the screen.** If an order is added between the check and
   the delete, the database refuses with a foreign-key error (`23503`). That error is mapped
   to the same plain reason.
-- `validateCustomer` and `validateVehicle` run inside update **before any request**. If they
+- `validateCustomer` and `validateVehicle` run inside update **before any request**
+  (`validateVehicle` also runs inside `createVehicle`). If they
   throw, nothing is sent.
   - **Customer:** the name is required, and spaces alone count as empty. The email, when
     set, must have the same shape the CSV import checks (`x@y.z`). Values are trimmed, and
@@ -76,9 +77,15 @@ deleting a customer also deletes their appointments, and the confirm text says s
   edit form stays open with what was typed, and nothing is changed.
 - After a successful edit or delete, the list reloads straight away.
 - **Shared form fields:** the customer and vehicle fields are now components used by both
-  create and edit (`CustomerFormFields`, `VehicleFormFields`). Create and add-vehicle behave
-  exactly as before: same fields, same browser checks, and add-vehicle still allows years
-  up to 2100.
+  create and edit (`CustomerFormFields`, `VehicleFormFields`). Create customer behaves
+  exactly as before.
+- **Add vehicle now follows the same rules as edit:** years 1900 to next year (it used to
+  allow up to 2100). The year input's max is next year, and `createVehicle` runs the same
+  `validateVehicle` before any request.
+  - A refused add shows the reason in the page's error banner, keeps what was typed, and
+    saves nothing.
+  - The CSV import also calls `createVehicle`. It already checks the same rules before
+    calling, so its results don't change (see Regressions).
 
 ### 3. Printable invoice: `src/lib/invoiceDocument.ts` (new) + `src/components/InvoicePrintView.tsx` (new)
 - Every invoice in the Invoices card gets a **Print** button, whatever its status. It opens
@@ -146,14 +153,14 @@ shop's own email or WhatsApp.
 - `npm run typecheck`: clean.
 - `npm run lint`: 0 findings.
 - `npm run build`: OK, with **no warnings**.
-  - The main chunk is **497.37 kB** (490.97 kB on `main`).
+  - The main chunk is **497.19 kB** (490.97 kB on `main`).
   - `InvoicePrintView` is its own chunk, 7.53 kB.
   - RepairGuides (8.93 kB) and Import (13.99 kB) are unchanged.
   - Without the lazy load the main chunk was 504.64 kB and the build warned, which is why
     the print view is lazy.
 - The built CSS contains the `@media print` block exactly as written.
 
-### Walkthrough 1: customers, vehicles, invoice data and links (104/104 checks pass)
+### Walkthrough 1: customers, vehicles, invoice data and links (115/115 checks pass)
 **How it was run:**
 - The same harness as the earlier prompts.
 - The project's real `data.ts`, `invoiceDocument.ts` and `format.ts` were loaded through the
@@ -201,6 +208,14 @@ shop's own email or WhatsApp.
   - **mileage −1**, mileage 10.5
 - 1900, 2027 and mileage 0 were accepted.
 - Editing a vehicle that doesn't exist gets a clear message.
+
+**Vehicle add (same rules as edit):**
+- **Refused, with the database unchanged after all 7:**
+  - missing make, a model of only spaces
+  - year 1899, year 2028, **year 2100** (allowed before this change), year NaN
+  - mileage −1
+- 1900, 2027 and mileage 0 were accepted. Values are trimmed, and blanks are stored as null,
+  as before.
 
 **Customer delete:**
 - **Refused, with nothing deleted or changed (full snapshot of 5 tables compared):**
@@ -329,6 +344,13 @@ All pass with the same counts as on PR #10:
 - earnings 31/31
 - admin login 27/27
 - CSV import 71/71
+  - **One assertion was updated.** The "database error on one row fails only that row" case
+    forces year 1800 past the import's own checks. `createVehicle` now refuses it before the
+    database, so the reason reads "Year must be between 1900 and 2027." instead of
+    "Failed to add vehicle: …".
+  - The outcome is the same: row 3 fails with its customer saved, rows 2 and 4 import, and
+    the counts are unchanged.
+  - That case therefore no longer reaches a real database error on import.
 - **repair guides 103/103**
 - fresh-database migration check 14/14
 
@@ -368,16 +390,13 @@ None of the scripts needed changes, since there's no new migration or table.
    asked, nothing is guessed, and the view shows the digits it will use. If most customers
    are stored without a country code, a shop-level default country code would be a separate
    prompt.
-3. **The add-vehicle form still allows years up to 2100** (unchanged; the database check is
-   1900–2100). Edit enforces 1900 to next year, as specified. To make add match, the add
-   form would need the same check, which is a one-line follow-up if wanted.
-4. **The invoice lines come from the order-level labor and parts,** as specified, not from
+3. **The invoice lines come from the order-level labor and parts,** as specified, not from
    the order's services. On an order whose services differ from the order-level fields, the
    lines may not add up to the invoiced subtotal. The invoice's own amounts are what's
    printed as owed.
-5. **No shop details on the invoice** (name, address, logo, phone), because none are
+4. **No shop details on the invoice** (name, address, logo, phone), because none are
    stored. That would be a separate prompt with a settings table.
-6. **The main chunk is 497.37 kB,** just under the 500 kB warning. The next feature that
+5. **The main chunk is 497.19 kB,** just under the 500 kB warning. The next feature that
    adds to the main bundle will likely need more code-splitting, for example lazy-loading
    RepairOrderDetail.
 

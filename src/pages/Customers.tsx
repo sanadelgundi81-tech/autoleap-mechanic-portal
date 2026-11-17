@@ -415,7 +415,7 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
                   onSubmit={(e) => void handleAddVehicle(e, customer.id)}
                   className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-800 pt-4 md:grid-cols-2"
                 >
-                  <VehicleFormFields values={newVehicle} onChange={setNewVehicle} maxYear={2100} />
+                  <VehicleFormFields values={newVehicle} onChange={setNewVehicle} maxYear={nextYear} />
                   <div className="md:col-span-2">
                     <PrimaryButton type="submit" disabled={savingVehicle}>
                       {savingVehicle ? 'Adding…' : 'Add Vehicle'}

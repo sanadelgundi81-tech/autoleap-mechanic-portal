@@ -1566,22 +1566,13 @@ export interface NewVehicleInput {
   mileage_km: number | null
 }
 
+/** Same rules as edit (validateVehicle): nothing is sent when it throws. */
 export async function createVehicle(input: NewVehicleInput): Promise<Vehicle> {
+  const row = validateVehicle(input)
   const client = requireClient()
   const { data, error } = await client
     .from('vehicles')
-    .insert({
-      customer_id: input.customer_id,
-      year: input.year,
-      make: input.make,
-      model: input.model,
-      trim: input.trim || null,
-      transmission: input.transmission || null,
-      engine: input.engine || null,
-      vin: input.vin || null,
-      license_plate: input.license_plate || null,
-      mileage_km: input.mileage_km,
-    })
+    .insert({ customer_id: input.customer_id, ...row })
     .select('*')
     .single()
   throwIfError(error, 'Failed to add vehicle')
