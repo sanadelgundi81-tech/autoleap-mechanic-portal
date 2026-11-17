@@ -247,6 +247,6 @@ are:
 4. **Filtering happens in the browser** after loading every guide. That's fine for a shop's own library, even a few thousand guides. Nothing was tuned for more.
 5. **Applying the migration** to the live project is a manual step, like the earlier migrations.
 
-Not opened as a PR (Muse opens it), not merged, not deployed.
+Not merged, not deployed.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
