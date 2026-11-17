@@ -1693,10 +1693,10 @@ export interface RepairGuideFilter {
 /**
  * Filters guides in the browser (the library is one shop's own notes).
  * Make/model: a guide with no make applies to everything. A guide with a
- * make matches only when its make equals the typed make (trimmed,
- * case-insensitive). If a model is typed too and the guide has a model, the
- * guide's model must contain it (a guide with a make but no model applies to
- * every model of that make).
+ * make matches only when its make equals the typed make. If a model is typed
+ * too and the guide has a model, the guide's model must equal it (a guide
+ * with a make but no model applies to every model of that make). Both are
+ * exact matches, trimmed and case-insensitive.
  */
 export function filterRepairGuides(guides: RepairGuide[], filter: RepairGuideFilter): RepairGuide[] {
   const search = (filter.search ?? '').trim().toLowerCase()
@@ -1709,7 +1709,7 @@ export function filterRepairGuides(guides: RepairGuide[], filter: RepairGuideFil
     }
     if (make && g.vehicle_make) {
       if (g.vehicle_make.trim().toLowerCase() !== make) return false
-      if (model && g.vehicle_model && !g.vehicle_model.toLowerCase().includes(model)) return false
+      if (model && g.vehicle_model && g.vehicle_model.trim().toLowerCase() !== model) return false
     }
     return true
   })
