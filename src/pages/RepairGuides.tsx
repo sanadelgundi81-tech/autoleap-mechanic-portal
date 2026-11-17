@@ -4,6 +4,7 @@ import {
   deleteRepairGuide,
   fetchRepairGuides,
   filterRepairGuides,
+  parseFilterYear,
   updateRepairGuide,
   type RepairGuideInput,
 } from '../lib/data'
@@ -100,6 +101,7 @@ export function RepairGuides() {
   const [search, setSearch] = useState('')
   const [make, setMake] = useState('')
   const [model, setModel] = useState('')
+  const [yearText, setYearText] = useState('')
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   /** null = no form open; 'new' = creating; otherwise the id being edited. */
@@ -127,9 +129,11 @@ export function RepairGuides() {
     }
   }, [])
 
+  const year = parseFilterYear(yearText)
+  const yearIncomplete = yearText.trim() !== '' && year === null
   const matching = useMemo(
-    () => filterRepairGuides(guides, { search, make, model }),
-    [guides, search, make, model],
+    () => filterRepairGuides(guides, { search, make, model, year }),
+    [guides, search, make, model, year],
   )
   const tabCounts = useMemo(() => {
     const counts: Record<RepairGuideCategory, number> = { procedure: 0, spec: 0, wiring: 0, bulletin: 0 }
@@ -138,7 +142,7 @@ export function RepairGuides() {
   }, [matching])
   const visible = useMemo(() => matching.filter((g) => g.category === tab), [matching, tab])
   const selected = guides.find((g) => g.id === selectedId) ?? null
-  const filtering = search.trim() !== '' || make.trim() !== ''
+  const filtering = search.trim() !== '' || make.trim() !== '' || year !== null
 
   async function reload() {
     try {
@@ -376,7 +380,7 @@ export function RepairGuides() {
 
       <ErrorBanner message={error} />
 
-      <Card className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr]">
+      <Card className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_8rem]">
         <Field label="Search title and content">
           <input
             className={inputClassName}
@@ -403,9 +407,21 @@ export function RepairGuides() {
             disabled={!make.trim()}
           />
         </Field>
-        {make.trim() !== '' && (
-          <p className="text-xs text-slate-400 sm:col-span-3">
-            Showing guides for this vehicle plus guides that apply to all vehicles.
+        <Field label="Model year">
+          <input
+            className={inputClassName}
+            inputMode="numeric"
+            maxLength={4}
+            value={yearText}
+            onChange={(e) => setYearText(e.target.value)}
+            placeholder="Any year"
+          />
+        </Field>
+        {(make.trim() !== '' || year !== null || yearIncomplete) && (
+          <p className="text-xs text-slate-400 sm:col-span-2 lg:col-span-4">
+            {yearIncomplete
+              ? 'Enter a 4-digit year (e.g. 2018) to filter by year.'
+              : 'Showing guides for this vehicle plus guides that apply to all vehicles.'}
           </p>
         )}
       </Card>

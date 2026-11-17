@@ -1688,6 +1688,17 @@ export interface RepairGuideFilter {
   /** Vehicle the guides should apply to. Guides with no make always match. */
   make?: string
   model?: string
+  /** Model year the guides should apply to. Guides with no year range always match. */
+  year?: number | null
+}
+
+/**
+ * The year filter box: only a complete 4-digit year filters. Anything else
+ * (empty, or "20" while still typing) means no year filter.
+ */
+export function parseFilterYear(text: string): number | null {
+  const trimmed = text.trim()
+  return /^\d{4}$/.test(trimmed) ? Number(trimmed) : null
 }
 
 /**
@@ -1697,11 +1708,15 @@ export interface RepairGuideFilter {
  * too and the guide has a model, the guide's model must equal it (a guide
  * with a make but no model applies to every model of that make). Both are
  * exact matches, trimmed and case-insensitive.
+ * Year: a guide matches when the year is inside its range. A missing year
+ * from / year to leaves that end open; a guide with neither applies to every
+ * year. The year filter works on its own, with or without a make.
  */
 export function filterRepairGuides(guides: RepairGuide[], filter: RepairGuideFilter): RepairGuide[] {
   const search = (filter.search ?? '').trim().toLowerCase()
   const make = (filter.make ?? '').trim().toLowerCase()
   const model = (filter.model ?? '').trim().toLowerCase()
+  const year = filter.year ?? null
   return guides.filter((g) => {
     if (filter.category && g.category !== filter.category) return false
     if (search && !g.title.toLowerCase().includes(search) && !g.content.toLowerCase().includes(search)) {
@@ -1710,6 +1725,10 @@ export function filterRepairGuides(guides: RepairGuide[], filter: RepairGuideFil
     if (make && g.vehicle_make) {
       if (g.vehicle_make.trim().toLowerCase() !== make) return false
       if (model && g.vehicle_model && g.vehicle_model.trim().toLowerCase() !== model) return false
+    }
+    if (year !== null) {
+      if (g.year_from !== null && year < g.year_from) return false
+      if (g.year_to !== null && year > g.year_to) return false
     }
     return true
   })

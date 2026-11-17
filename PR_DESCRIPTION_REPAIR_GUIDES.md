@@ -53,7 +53,7 @@ They follow the existing pattern: `requireClient()`, `.from('repair_guides')`, a
   - trims the title, content, make and model
   - stores an empty make or model as null
   - checks the rules listed under Validation below
-- `filterRepairGuides(guides, { category, search, make, model })` is a pure function for the tabs, search and filter. It runs in the browser, since the library holds one shop's own notes.
+- `filterRepairGuides(guides, { category, search, make, model, year })` is a pure function for the tabs, search and filter. It runs in the browser, since the library holds one shop's own notes.
 
 All writes go through these functions. There are no raw inserts anywhere else.
 
@@ -61,6 +61,7 @@ All writes go through these functions. There are no raw inserts anywhere else.
 - **Library:**
   - The search box matches title **or** content, case-insensitive.
   - **Vehicle make** and **Vehicle model** inputs. The model input is disabled until a make is typed.
+  - A **Model year** input. It filters only once a complete 4-digit year is typed (`parseFilterYear`); a partial entry shows "Enter a 4-digit year (e.g. 2018) to filter by year." and doesn't filter yet.
   - Four tabs, each showing the count of guides that match the current search and filter.
   - The list shows title, "applies to" (for example "Toyota Camry · 2018–2022", "Honda · up to 2019" or "All vehicles") and a short preview of the content.
   - The empty state says "No procedures yet. Use 'New guide' to add one", or "… match this search" when a search or filter is active.
@@ -80,6 +81,11 @@ All writes go through these functions. There are no raw inserts anywhere else.
 - A guide with a make matches only when its make **equals** the typed make (trimmed, case-insensitive). Typing "toy" does not find Toyota.
 - If a model is also typed and the guide has a model, the guide's model must **equal** it (trimmed, case-insensitive). Typing "cam" does not find Camry.
 - A guide with a make but **no model** applies to every model of that make.
+
+**Year rule:**
+- A guide matches when the typed year is inside its range, ends included.
+- A missing year from or year to leaves that end open ("2015 and later", "up to 2019"). A guide with neither applies to every year.
+- The year filter works on its own, with or without a make, and also applies to guides with no make ("All makes · 2020 and later").
 
 **Validation:**
 - Title, category and content are required. Spaces alone count as empty.
@@ -104,11 +110,11 @@ are:
 - `npm run typecheck`: clean.
 - `npm run lint`: 0 findings.
 - `npm run build`: OK, with **no warnings**.
-  - The main chunk is **490.79 kB**, under 500 kB. It was 488.27 kB on `main`; the +2.5 kB is the data functions and types.
-  - RepairGuides is its own chunk, 8.58 kB.
+  - The main chunk is **490.97 kB**, under 500 kB. It was 488.27 kB on `main`; the +2.7 kB is the data functions and types.
+  - RepairGuides is its own chunk, 8.93 kB.
   - Import is unchanged at 13.99 kB.
 
-### Repair guides walkthrough (91/91 checks pass)
+### Repair guides walkthrough (103/103 checks pass)
 **How it was run:**
 - The same harness as the earlier prompts.
 - The project's real `data.ts` was loaded through the project's own Vite and wrote through real supabase-js.
@@ -165,6 +171,14 @@ are:
   - Honda + "Civic" shows the Honda bulletin, which has no model, so it applies to every Honda.
   - **Exact make match:** "toy" shows only the no-make guides (not Toyota), "  TOYOTA  " matches Toyota, and "Ford Motor" does not match Ford.
   - "tesla" shows only the no-make guides.
+- **Year filter** (ranges: Camry 2018–2022, Ford 2015+, Honda up to 2019, the other two none):
+  - **2020** shows Camry, Ford and the 2 no-year guides; the Honda bulletin is hidden.
+  - **2018** shows all 5, and **2022** still shows Camry: range ends are included.
+  - **2010** shows only Honda + the no-year guides; **2023** only Ford + the no-year guides.
+  - Toyota + 2023 hides Camry by year; Toyota + Camry + 2020 shows it.
+  - Inside a tab: Bulletins is empty for 2020.
+  - A guide with no make but "2020 and later" is hidden for 2019 and shown for 2020, and the year still applies to it under a make filter.
+  - `parseFilterYear`: "2018" and " 2018 " filter; "", "20", "201", "abcd", "20188" and "2018.5" don't.
   - The filter also works inside a single tab.
   - A model with no make doesn't filter (the page disables the model input until a make is typed).
 
@@ -228,7 +242,7 @@ are:
 ## Open items
 
 1. **Decided:** the database checks stay, and make and model filters are both exact matches (trimmed, case-insensitive). A misspelt make or model in a guide ("Toyta", "Camary") won't match; the shop fixes it by editing the guide.
-2. **No year filter.** The filter is make/model only, as specified. The guide's year range is shown but not used to filter. A year box could be added later.
+2. **Year filter added** on request (see Year rule). It filters by a single model year; there's no year-range search.
 3. **Content is plain text.** There are no images, PDFs or wiring diagrams as files. Line breaks are kept, and the content box uses a monospace font so pin tables line up. Attachments would need storage, which is out of scope here.
 4. **Filtering happens in the browser** after loading every guide. That's fine for a shop's own library, even a few thousand guides. Nothing was tuned for more.
 5. **Applying the migration** to the live project is a manual step, like the earlier migrations.
