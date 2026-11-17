@@ -435,15 +435,6 @@ export const REPAIR_GUIDE_CATEGORY_LABELS: Record<RepairGuideCategory, string> =
  * supabase/migrations/20261116030000_repair_guides.sql.
  * No make = applies to every vehicle.
  */
-/** The single shop_settings row. */
-export interface ShopSettings {
-  id: number
-  /** Digits only, no "+" (e.g. "44"). Null = not set: phones are used as stored. */
-  whatsapp_country_code: string | null
-  created_at: string
-  updated_at: string
-}
-
 export interface RepairGuide {
   id: string
   title: string

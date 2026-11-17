@@ -29,7 +29,6 @@ import type {
   RepairOrderPriority,
   RepairOrderStatus,
   ServiceCounts,
-  ShopSettings,
   Timelog,
   Vehicle,
 } from './types'
@@ -1718,48 +1717,6 @@ export async function deleteVehicle(id: string): Promise<void> {
   }
   throwIfError(error, 'Failed to delete vehicle')
   if (!data || data.length === 0) throw new Error('That vehicle was already deleted.')
-}
-
-// ---------- Shop settings ----------
-// One row (id 1), created by the migration. The app only reads and updates it.
-
-/**
- * Checks a country code typed by the shop: "+44", "44" or " 44 " → "44".
- * Blank → null (not set). Otherwise 1–3 digits, not starting with 0.
- */
-export function cleanCountryCode(value: string | null | undefined): string | null {
-  const raw = (value ?? '').trim()
-  if (raw === '') return null
-  // A lone "+" is refused, not treated as blank (that would silently clear the code).
-  const trimmed = raw.replace(/^\+/, '').trim()
-  if (!/^[1-9][0-9]{0,2}$/.test(trimmed)) {
-    throw new Error('A country code is 1 to 3 digits, like 44 or 1 (no leading 0).')
-  }
-  return trimmed
-}
-
-export async function fetchShopSettings(): Promise<ShopSettings> {
-  const client = requireClient()
-  const { data, error } = await client.from('shop_settings').select('*').eq('id', 1).maybeSingle()
-  throwIfError(error, 'Failed to load shop settings')
-  if (!data) throw new Error('Shop settings are missing. The shop settings migration may not be applied yet.')
-  return data as ShopSettings
-}
-
-/** Sets (or clears, with blank) the default WhatsApp country code. */
-export async function updateWhatsAppCountryCode(value: string | null): Promise<ShopSettings> {
-  const code = cleanCountryCode(value)
-  const client = requireClient()
-  const { data, error } = await client
-    .from('shop_settings')
-    .update({ whatsapp_country_code: code })
-    .eq('id', 1)
-    .select('*')
-  throwIfError(error, 'Failed to save the country code')
-  if (!data || data.length === 0) {
-    throw new Error('Shop settings are missing. The shop settings migration may not be applied yet.')
-  }
-  return data[0] as ShopSettings
 }
 
 // ---------- Repair guides ----------

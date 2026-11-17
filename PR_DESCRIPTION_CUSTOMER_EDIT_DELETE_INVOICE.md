@@ -1,5 +1,7 @@
 # Stage 2, prompt 10: edit + delete customers/vehicles, printable + sendable invoices
 
+**The default WhatsApp country code setting was stripped before merge, at the owner's decision** (its migration, table, data functions, number rule and invoice-view box are all gone; WhatsApp uses the stored phone's digits as stored). New counts: Walkthrough 1 115/115, Walkthrough 2 (print) 51/51, number rule by hand 11/11, regressions unchanged (12, 39, 35, 55, 34, 31, 27, 71, 103, migration check 14/14); main chunk 497.19 kB.
+
 Branch: `feat/customer-edit-delete-invoice-20261117` (base: `main` @ `571695d`, Stage 2 prompt 9 / Repair Guides merged as PR #10)
 
 **Precondition checked before building.** I checked out `main` and pulled. It was already
@@ -14,11 +16,8 @@ Two gaps the shop hit while entering real data:
 - A customer or vehicle could not be fixed or removed after it was typed in.
 - An invoice could not be printed or sent.
 
-Added on request: a **default WhatsApp country code** setting (section 5).
-
-**One migration, additive only:** a one-row `shop_settings` table for the WhatsApp country
-code. There's no new npm dependency, no backend and no secrets. The foreign keys were left
-exactly as they are.
+**No migration.** There's no new npm dependency, no backend and no secrets. The foreign keys
+were left exactly as they are.
 
 ### 1. Data functions: `src/lib/data.ts`
 They follow the existing pattern: `requireClient()`, `.from(...)`, `throwIfError(error, 'Failed to …')`.
@@ -133,8 +132,9 @@ shop's own email or WhatsApp.
   - Encoded with `encodeURIComponent`, so spaces don't turn into "+" in mail apps.
 - **Send via WhatsApp** is a `https://wa.me/<digits>?text=…` link, opened in a new tab,
   with the same summary.
-  - **The number:** built from the stored phone and the shop's default country code
-    (section 5). The view always says which number WhatsApp will open, and why.
+  - **The number:** the stored phone with spaces, dashes, brackets and a leading "+"
+    removed, digits used exactly as stored. No country code is added, a leading 0 is kept,
+    and "00" is kept. The stored phone is never changed.
 - **When a contact is missing,** that button is disabled. The reason shows as text and as
   the button's tooltip: "No email on file for this customer." / "No phone on file for this
   customer."
@@ -142,72 +142,6 @@ shop's own email or WhatsApp.
   that isn't email-shaped, or a phone with letters such as "ext 2".
 - **PDF note:** one line on the view says "The app doesn't attach the PDF: print this invoice
   to PDF first, then attach it to the email or WhatsApp message before sending."
-
-### 5. Default WhatsApp country code (added on request)
-**Decided with the shop:**
-- The setting is saved in the **database**, so it's set once for every device.
-- Phones are read with the **drop-leading-0** rule.
-
-**Migration `supabase/migrations/20261117010000_shop_settings.sql` (new):**
-- **Version** `20261117010000` comes after the latest existing `20261116030000`.
-- **Table `shop_settings`:**
-  - `id` integer, primary key, default 1, **check `id = 1`**, so a second row is impossible
-  - `whatsapp_country_code` text, null = not set, with a database check for 1–3 digits
-    not starting with 0 (stored without "+")
-  - `created_at`, `updated_at`
-- **The single row** (id 1, code not set) is created by the migration with
-  `on conflict do nothing`, so re-running it is harmless. The app only reads and updates
-  that row.
-- **`updated_at` trigger,** reusing `public.set_updated_at()`.
-- **RLS on**, with the same `authenticated_full_access` policy as every other table.
-- Additive only: no existing table is changed.
-
-**Data functions (`src/lib/data.ts`):**
-- `fetchShopSettings()`.
-- `updateWhatsAppCountryCode(value)`.
-- `cleanCountryCode(value)` runs before any request:
-  - "+44", "44" and " + 44 " all become "44"
-  - blank clears the code (null)
-  - anything else must be 1–3 digits not starting with 0, otherwise it's refused with
-    "A country code is 1 to 3 digits, like 44 or 1 (no leading 0)."
-  - A lone "+" is refused too, rather than read as blank, so it can't clear the code by
-    accident.
-- A missing row gets "Shop settings are missing. The shop settings migration may not be
-  applied yet."
-
-**Number rule (`resolveWhatsAppNumber` in `src/lib/invoiceDocument.ts`):** spaces, dashes and
-brackets are removed first. Then:
-
-| Stored phone | Default code | wa.me number | Why |
-|---|---|---|---|
-| `+44 20 7946 0018` | any | `442079460018` | already international ("+") |
-| `0044 20 7946 0018` | any | `442079460018` | already international ("00") |
-| `020 7946 0018` | 44 | `442079460018` | one leading 0 dropped, +44 added |
-| `7946 0018` | 44 | `4479460018` | +44 added |
-| `020 7946 0018` | not set | `02079460018` | digits as stored, as before |
-
-- **The stored phone is never changed.** Only the link is built this way.
-- **One behavior change from the first version of this branch:** a phone stored as
-  `0044 …` now opens `44…` even with no default set. Before, it opened `0044…`, which
-  wa.me doesn't accept. `00` is the international dialling prefix, so this adds nothing
-  that wasn't stored.
-
-**On the invoice view** (toolbar only, never printed):
-- **A setting box:** "Default WhatsApp country code: + [  ] Save".
-  - It's prefilled from the database.
-  - **Save** is disabled while the box matches the stored value.
-  - After a save it shows "Saved for all devices.", and the WhatsApp link updates straight
-    away.
-  - A refused value shows its reason and changes nothing.
-- **The hint says exactly which number opens:**
-  - "WhatsApp opens to 442079460018: the default +44 was added to the stored 020 7946 0018."
-  - "… using the country code stored with the number."
-  - "… exactly as stored. If stored numbers don't include a country code, set a default
-    below."
-- **If the setting can't be loaded** (for example, the migration isn't applied live yet):
-  - an amber note says it isn't available and phones are used exactly as stored
-  - **WhatsApp, email and printing all keep working**
-  - while the setting loads (a moment), the WhatsApp button is briefly disabled
 
 **Not touched:**
 - the admin login, `AuthContext`, Login, App routing and Layout
@@ -221,8 +155,9 @@ brackets are removed first. Then:
 - `npm run typecheck`: clean.
 - `npm run lint`: 0 findings.
 - `npm run build`: OK, with **no warnings**.
-  - The main chunk is **498.00 kB** (490.97 kB on `main`).
-  - `InvoicePrintView` is its own chunk, 10.05 kB, including the country code setting.
+  - The main chunk is **497.19 kB** (490.97 kB on `main`; 498.00 kB before the setting was
+    stripped).
+  - `InvoicePrintView` is its own chunk, 7.37 kB.
   - RepairGuides (8.93 kB) and Import (13.99 kB) are unchanged.
   - Without the lazy load the main chunk was 504.64 kB and the build warned, which is why
     the print view is lazy.
@@ -363,6 +298,21 @@ brackets are removed first. Then:
 
 **Cleanup:** 0 customers, 0 vehicles and 0 repair orders were left.
 
+### Number rule, checked by hand (11/11 checks pass)
+Same harness. Each phone was saved on a real customer, with a real order and invoice, and
+the link was built by the real `buildInvoiceDocument` + `invoiceWhatsAppLink`:
+
+| Stored phone | wa.me number |
+|---|---|
+| `+44 (20) 7946-0018` | `442079460018` |
+| `020 7946 0018` | `02079460018` (no code added, leading 0 kept) |
+| `0044 20 7946 0018` | `00442079460018` ("00" kept) |
+
+- **Each stored phone was re-read afterwards and is unchanged.**
+- `invoiceDocument.ts` no longer exports `resolveWhatsAppNumber`, and `whatsAppDigits` /
+  `invoiceWhatsAppLink` take no country code argument. `data.ts` has no setting functions.
+- Test data cleaned up (0 customers, 0 vehicles).
+
 ### Walkthrough 2: print view in headless Chrome (51/51 checks pass)
 **How it was run:**
 - The **real** `InvoicePrintView` and the **real** `src/index.css` (Tailwind built from the
@@ -379,6 +329,7 @@ brackets are removed first. Then:
 - The sheet's text contains all 20 expected values: number, date, customer, phone, email,
   vehicle, plate, both lines, subtotal, tax, total and paid status.
 - The toolbar has Print, Send via email, Send via WhatsApp and Close, and the PDF note.
+  Nothing else: there's no hint naming the WhatsApp number and no mention of a country code.
 - The email button is the mailto link. The WhatsApp button is the wa.me link with
   `target=_blank`.
 
@@ -392,9 +343,6 @@ brackets are removed first. Then:
   `rgb(0, 0, 0)`.
 - **Print-to-PDF gives exactly 1 page.**
 
-This run has no database behind it, so it also covers the "setting not available" fallback:
-the WhatsApp link from "+44 (20) 7946-0018" is still `wa.me/442079460018`.
-
 **Draft invoice for a customer with no email or phone:**
 - It prints "Status: Draft" and "Payment status: Draft", with no paid date.
 - "Subtotal (as invoiced)" $400.00 / $32.00 / $432.00, with the lines at $300.00 and
@@ -404,94 +352,6 @@ the WhatsApp link from "+44 (20) 7946-0018" is still `wa.me/442079460018`.
   text, and there are no mailto/wa.me links.
 - The adjusted-subtotal note shows on screen.
 - 1-page PDF.
-
-### Walkthrough 3: default WhatsApp country code, data and number rule (66/66 checks pass)
-Same harness as Walkthrough 1, with the real migration, `data.ts` and `invoiceDocument.ts`.
-
-**Schema:**
-- 7 migrations apply in order, with `shop_settings` last.
-- **There are now 15 tables, all with RLS.**
-- The only policy is `authenticated_full_access`.
-- The trigger is present, and the columns are as specified.
-- **There's exactly one row after migrating:** id 1, code null.
-- **The database check refuses** `044`, `1234`, `abc`, `+44`, `''` and `0`.
-- **A second row (id 2) is refused.**
-- `anon` reads 0 rows and cannot set the code.
-- **Re-running the migration leaves the row unchanged.**
-
-**Data functions:**
-- **`cleanCountryCode`:** 9 cases (`44`, `+44`, ` +44 `, `+ 44`, `1`, `971`, blank,
-  spaces, null).
-- **Save "+44":**
-  - stores "44"
-  - `updated_at` moves and `created_at` is kept
-  - fetch returns 44
-- **7 refused values** (`044`, `1234`, `4a`, `0`, `+`, `44 1`, `00`), each with the reason
-  and **before any request**. The stored code stayed 44.
-- **Blank clears it.**
-- **Row deleted:** fetch and save both give the clear "migration may not be applied" reason.
-- **Table dropped:** fetch fails with a "Failed to load shop settings: …" message, not a
-  crash.
-
-**Number rule:**
-- **14 cases**, each checked for the digits, "already international" and "code added".
-  They include all 5 table rows above, plus:
-  - `07700 900123`
-  - `(020) 7946-0018`
-  - `+1 555-010-1234` with default 44 (stays 1)
-  - `00 1 555 010 1234`
-  - `+ 44 …`
-  - `(555) 010-1234` with default 1
-  - `555-0101` with no default
-  - `+44 (20) 7946-0018`
-  - `0044 …` with no default
-- `0123` + 44 → `44123`.
-- **`0 0123` reads as "00…", already international, and becomes `123`.** That follows the
-  rule as chosen.
-- **A phone with "ext 2" gives null** (button disabled), with or without a default.
-- No phone gives null.
-
-**End to end:**
-- A real customer with phone `020 7946 0018` and a real invoice.
-- **With the stored code 44** the link is `wa.me/442079460018`, with the same message text.
-- **The customer's stored phone is unchanged.**
-- The email link is unaffected.
-- **Clearing the setting** brings the link back to `wa.me/02079460018`.
-
-### Walkthrough 4: country code setting in headless Chrome (25/25 checks pass)
-**How it was run:**
-- The real `InvoicePrintView` in headless Chrome, as in Walkthrough 2.
-- This time the page's Supabase client talked to the local stand-in (fresh PGlite with all
-  7 migrations), through the harness origin.
-- **Every request went to 127.0.0.1** (checked). The harness refuses to run if a `.env`
-  file exists, and there is none in the repo.
-
-**One page load:**
-- The setting is fetched 2 times (StrictMode's dev double effect), with no reload loop.
-- Print is called once.
-
-**Results:**
-- **No default:**
-  - the box is empty
-  - the link is `wa.me/02079460018`, with the hint "exactly as stored"
-  - Save is disabled
-- **Type "+44" and Save:**
-  - **the database holds "44"**
-  - "Saved for all devices." shows
-  - **the link changes to `wa.me/442079460018` straight away**
-  - the hint says "the default +44 was added to the stored 020 7946 0018."
-  - nothing is printed again
-- **Reload:** the box shows 44, and the link still uses it (**it persists**).
-- **A "+44 (20) 7946-0018" customer** keeps `wa.me/442079460018` "using the country code
-  stored with the number".
-- **"044" is refused** with its reason. The database still holds 44, and the link is
-  unchanged.
-- **Blank and Save clears it in the database,** and the link goes back to as-stored.
-- **Print media:** the setting box isn't rendered.
-- **Table dropped (migration not applied):**
-  - the amber note shows, and there's no setting box
-  - **WhatsApp still opens the as-stored number**
-  - the invoice renders and prints once
 
 ### Regressions: earlier walkthroughs rerun on this branch
 All pass with the same counts as on PR #10:
@@ -513,17 +373,15 @@ All pass with the same counts as on PR #10:
 - **repair guides 103/103**
 - fresh-database migration check 14/14
 - Walkthrough 1 (customers/vehicles/invoices) 115/115 and Walkthrough 2 (print) 51/51,
-  rerun after the country code change.
+  rerun on the stripped branch.
 
-**Changes to the test setup for the new migration:**
-- The stand-in's table list gained `shop_settings`.
-- Four scripts pinned the old schema shape:
-  - the migration check: "14 tables" → 15
-  - repair guides: "6 migrations" → 7, and 14 → 15 tables
-  - timelogs: 6 → 7 migrations, and 14 → 15 tables
-  - notifications: the migration list gained the new file
-
-  Nothing else in them changed. The same was done for earlier migrations.
+**Test setup after the strip:**
+- The stand-in's table list and the four scripts that pin the schema shape (migration
+  check, repair guides, timelogs, notifications) are back to **6 migrations / 14 tables**,
+  as on PR #10.
+- Walkthrough 2's one check on the WhatsApp hint now asserts that no hint naming the number
+  is shown, since that hint was removed.
+- The two setting walkthroughs were deleted, not rerun: there's no setting left to test.
 
 ## What was NOT verified
 
@@ -546,31 +404,24 @@ All pass with the same counts as on PR #10:
 - **No paper was printed.** The print result was checked by computed styles and a
   Chrome print-to-PDF, not on Safari or Firefox.
 - **The REST layer was a stand-in, not real PostgREST.**
-- **The country code setting was tested in a test shell, not in the signed-in app.** Saving
-  it as the real signed-in admin, on the live project, wasn't exercised.
 - **Nothing was applied live or deployed.** The live database, which holds the shop's real
-  customers, was not touched. **The `shop_settings` migration is not applied.** Until it is,
-  the invoice view shows the "not available" note and uses phones as stored.
+  customers, was not touched.
 
 ## Open items
 
 1. **Deleting a customer also deletes their appointments** (`appointments.customer_id` is
    ON DELETE CASCADE in the foundation migration). It wasn't in the prompt's list. The
    behavior was left as the schema has it, and the confirm text tells the shop.
-2. **Apply the `shop_settings` migration** to the live project. It's a manual step, like the
-   earlier migrations. Then set the default country code once, from any invoice view.
-3. **Numbers stored with a country code but no "+" or "00"** (for example "442079460018")
-   will get the default added again once one is set: "44442079460018". The view shows the
-   number before opening, so it's visible. The fix is to store those numbers with a "+".
-   This is the limit of the rule chosen, since without "+" or "00" a stored code can't be
-   told apart from a local number.
-4. **The invoice lines come from the order-level labor and parts,** as specified, not from
+2. **WhatsApp opens the digits exactly as stored.** A phone stored without its country code
+   (for example "020 7946 0018") opens `wa.me/02079460018`, which WhatsApp won't match to
+   an account. The fix is to store phones with their country code.
+3. **The invoice lines come from the order-level labor and parts,** as specified, not from
    the order's services. On an order whose services differ from the order-level fields, the
    lines may not add up to the invoiced subtotal. The invoice's own amounts are what's
    printed as owed.
-5. **No shop details on the invoice** (name, address, logo, phone), because none are
+4. **No shop details on the invoice** (name, address, logo, phone), because none are
    stored. That would be a separate prompt with a settings table.
-6. **The main chunk is 498.00 kB,** just under the 500 kB warning. The next feature that
+5. **The main chunk is 497.19 kB,** just under the 500 kB warning. The next feature that
    adds to the main bundle will likely need more code-splitting, for example lazy-loading
    RepairOrderDetail.
 
