@@ -15,7 +15,8 @@ export const PRINT_OPEN_CLASS = 'invoice-print-open'
 /**
  * A printable invoice, shown over the app and rendered outside #root so the
  * print stylesheet (index.css) can hide the whole app and print only this.
- * Opening it starts the browser's print flow once.
+ * Opening it only shows the invoice on screen; the print dialog opens only when
+ * the Print button is tapped.
  */
 export function InvoicePrintView({
   repairOrder,
@@ -30,21 +31,18 @@ export function InvoicePrintView({
   const email = invoiceEmailLink(doc)
   const whatsApp = invoiceWhatsAppLink(doc)
 
-  // Kept in a ref so a parent re-render never re-runs the effect (and re-prints).
+  // Kept in a ref so a parent re-render never re-runs the effect.
   const closeRef = useRef(onClose)
   closeRef.current = onClose
 
   useEffect(() => {
     const root = document.documentElement
     root.classList.add(PRINT_OPEN_CLASS)
-    // Let the view paint before the print dialog opens.
-    const timer = window.setTimeout(() => window.print(), 100)
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => {
-      window.clearTimeout(timer)
       window.removeEventListener('keydown', onKey)
       root.classList.remove(PRINT_OPEN_CLASS)
     }
@@ -62,8 +60,8 @@ export function InvoicePrintView({
           <ToolbarButton onClick={() => window.print()} primary>
             Print
           </ToolbarButton>
-          <SendButton link={email} label="Send via email" />
-          <SendButton link={whatsApp} label="Send via WhatsApp" newTab />
+          <SendButton link={email} label="Open in email app" />
+          <SendButton link={whatsApp} label="Open in WhatsApp" newTab />
           <ToolbarButton onClick={onClose}>Close</ToolbarButton>
         </div>
         {email.reason && <p className="text-xs text-amber-300">Email: {email.reason}</p>}
