@@ -24,6 +24,7 @@ import {
   SecondaryButton,
   inputClassName,
 } from '../components/ui'
+import { OverflowMenu } from '../components/OverflowMenu'
 import type { View } from '../components/Layout'
 
 interface ManualEntryValues {
@@ -215,20 +216,20 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
                   {busyId === t.id ? 'Stopping…' : 'Stop'}
                 </PrimaryButton>
               ) : (
-                <>
-                  <SecondaryButton
-                    onClick={() => {
-                      setEditingId(t.id)
-                      setEditNote(t.note ?? '')
-                    }}
-                    disabled={busyId === t.id}
-                  >
-                    Edit note
-                  </SecondaryButton>
-                  <SecondaryButton onClick={() => handleDelete(t)} disabled={busyId === t.id}>
-                    Delete
-                  </SecondaryButton>
-                </>
+                <OverflowMenu
+                  label="Timelog actions"
+                  disabled={busyId === t.id}
+                  items={[
+                    {
+                      label: 'Edit note',
+                      onSelect: () => {
+                        setEditingId(t.id)
+                        setEditNote(t.note ?? '')
+                      },
+                    },
+                    { label: 'Delete', danger: true, onSelect: () => handleDelete(t) },
+                  ]}
+                />
               )}
             </div>
           </>

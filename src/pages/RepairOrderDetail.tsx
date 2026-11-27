@@ -36,6 +36,8 @@ import {
   ESTIMATE_STATUS_TRANSITIONS,
   INVOICE_STATUS_LABELS,
   INVOICE_STATUS_TRANSITIONS,
+  REPAIR_ORDER_PRIORITIES,
+  REPAIR_ORDER_PRIORITY_LABELS,
   REPAIR_ORDER_STATUSES,
   REPAIR_ORDER_STATUS_LABELS,
   type Estimate,
@@ -44,6 +46,7 @@ import {
   type InvoiceStatus,
   type OrderService,
   type RepairOrder,
+  type RepairOrderPriority,
   type RepairOrderStatus,
 } from '../lib/types'
 import {
@@ -62,8 +65,7 @@ import {
   inputClassName,
 } from '../components/ui'
 import type { View } from '../components/Layout'
-
-type DetailTab = 'overview' | 'services'
+import { OverflowMenu } from '../components/OverflowMenu'
 
 // Only needed when Print is clicked, so it loads on demand (keeps the main chunk small).
 const InvoicePrintView = lazy(() =>
@@ -80,7 +82,6 @@ export function RepairOrderDetailPage({
   const [detail, setDetail] = useState<RepairOrderDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<DetailTab>('overview')
   const [status, setStatus] = useState<RepairOrderStatus>('estimate')
   const [savingStatus, setSavingStatus] = useState(false)
   const [savingWorkComplete, setSavingWorkComplete] = useState(false)
@@ -92,6 +93,12 @@ export function RepairOrderDetailPage({
   const [recommendations, setRecommendations] = useState('')
   const [savingRecommendations, setSavingRecommendations] = useState(false)
   const [startingInspection, setStartingInspection] = useState(false)
+
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [technicianEdit, setTechnicianEdit] = useState('')
+  const [bayEdit, setBayEdit] = useState('')
+  const [priorityEdit, setPriorityEdit] = useState<RepairOrderPriority>('medium')
+  const [savingDetails, setSavingDetails] = useState(false)
 
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState<RepairOrder[]>([])
@@ -259,8 +266,34 @@ export function RepairOrderDetailPage({
   const currentStep = REPAIR_ORDER_STATUSES.indexOf(ro.status)
   const vehicle = ro.vehicles
 
+  function openDetailsEdit() {
+    setTechnicianEdit(ro.technician ?? '')
+    setBayEdit(ro.bay ?? '')
+    setPriorityEdit(ro.priority)
+    setEditingDetails(true)
+  }
+
+  async function handleSaveDetails(event: FormEvent) {
+    event.preventDefault()
+    setError(null)
+    setSavingDetails(true)
+    try {
+      await updateRepairOrderFields(ro.id, {
+        technician: technicianEdit.trim() === '' ? null : technicianEdit.trim(),
+        bay: bayEdit.trim() === '' ? null : bayEdit.trim(),
+        priority: priorityEdit,
+      })
+      await load()
+      setEditingDetails(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingDetails(false)
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <div className="flex items-center justify-between">
         <SecondaryButton onClick={() => onNavigate({ name: 'repair-orders' })}>
           ← All Orders
@@ -269,354 +302,343 @@ export function RepairOrderDetailPage({
 
       <ErrorBanner message={error} />
 
+      {/* (a) Header: RO number, status, priority, vehicle + customer, created date. */}
       <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-blue-400">
-              Order - {ro.ro_number}
-            </span>
-            <h2 className="text-2xl font-bold text-white">{vehicleLabel(vehicle)}</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {ro.concern ?? 'No customer concern recorded.'}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-bold uppercase tracking-wider text-blue-400">
+                Order {ro.ro_number}
+              </span>
+              <RepairOrderStatusBadge status={ro.status} />
+              <PriorityBadge priority={ro.priority} />
+            </div>
+            <h1 className="mt-1 break-words text-2xl font-bold text-white">
+              {vehicleLabel(vehicle)}
+            </h1>
+            <p className="mt-0.5 text-sm text-slate-300">
+              <button
+                onClick={() => onNavigate({ name: 'customer', id: ro.customer_id })}
+                className="font-semibold text-blue-400 hover:text-blue-300"
+              >
+                {ro.customers?.name ?? 'Customer'}
+              </button>
+              <span className="text-slate-500"> · Created {formatDate(ro.created_at)}</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              Technician: {ro.technician ?? 'Unassigned'}
+              {' · '}Bay: {ro.bay ?? '—'}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <PriorityBadge priority={ro.priority} />
-            <RepairOrderStatusBadge status={ro.status} />
-            <span className="text-xs text-slate-400">
-              Customer: {ro.customers?.name}
-            </span>
-          </div>
+          <OverflowMenu
+            label="Order actions"
+            items={[{ label: 'Edit technician, bay & priority', onSelect: openDetailsEdit }]}
+          />
         </div>
 
-        <div className="mt-4 flex gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1">
-          <button
-            onClick={() => setTab('overview')}
-            className={`rounded-md px-4 py-1.5 text-sm font-semibold ${
-              tab === 'overview' ? 'bg-blue-600 text-white' : 'text-slate-300'
-            }`}
-          >
-            Overview
-          </button>
-          <button
-            onClick={() => setTab('services')}
-            className={`rounded-md px-4 py-1.5 text-sm font-semibold ${
-              tab === 'services' ? 'bg-blue-600 text-white' : 'text-slate-300'
-            }`}
-          >
-            Services
-          </button>
-        </div>
+        <p className="mt-3 rounded-lg bg-slate-800/60 p-3 text-sm text-slate-200">
+          <span className="font-semibold text-slate-400">Concern: </span>
+          {ro.concern ?? 'No customer concern recorded.'}
+        </p>
 
-        {tab === 'overview' ? (
-          <div className="mt-4 flex flex-col gap-6">
-            <div className="flex flex-wrap gap-1.5">
-              {REPAIR_ORDER_STATUSES.map((s, index) => (
-                <span
-                  key={s}
-                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                    index === currentStep
-                      ? 'border-blue-500 bg-blue-600 text-white'
-                      : index < currentStep
-                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                        : 'border-slate-700 bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  {REPAIR_ORDER_STATUS_LABELS[s]}
-                </span>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-slate-300">Move to:</span>
+        {editingDetails && (
+          <form
+            onSubmit={(e) => void handleSaveDetails(e)}
+            className="mt-3 grid grid-cols-1 gap-3 rounded-lg border border-blue-500/50 bg-slate-800/60 p-3 sm:grid-cols-3"
+          >
+            <Field label="Technician">
+              <input
+                value={technicianEdit}
+                onChange={(e) => setTechnicianEdit(e.target.value)}
+                className={inputClassName}
+                placeholder="e.g. Alex M."
+              />
+            </Field>
+            <Field label="Bay">
+              <input
+                value={bayEdit}
+                onChange={(e) => setBayEdit(e.target.value)}
+                className={inputClassName}
+                placeholder="e.g. Bay 1"
+              />
+            </Field>
+            <Field label="Priority">
               <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as RepairOrderStatus)}
-                className={`${inputClassName} w-auto`}
+                value={priorityEdit}
+                onChange={(e) => setPriorityEdit(e.target.value as RepairOrderPriority)}
+                className={inputClassName}
               >
-                {REPAIR_ORDER_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {REPAIR_ORDER_STATUS_LABELS[s]}
+                {REPAIR_ORDER_PRIORITIES.map((p) => (
+                  <option key={p} value={p}>
+                    {REPAIR_ORDER_PRIORITY_LABELS[p]}
                   </option>
                 ))}
               </select>
-              <PrimaryButton
-                onClick={() => void handleStatusChange()}
-                disabled={savingStatus || status === ro.status}
-              >
-                {savingStatus ? 'Updating…' : 'Update status'}
+            </Field>
+            <div className="flex gap-2 sm:col-span-3">
+              <PrimaryButton type="submit" disabled={savingDetails}>
+                {savingDetails ? 'Saving…' : 'Save'}
               </PrimaryButton>
+              <SecondaryButton onClick={() => setEditingDetails(false)}>Cancel</SecondaryButton>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-slate-300">
-                Work:{' '}
-                {ro.technician_completed_at
-                  ? `Completed ${formatDate(ro.technician_completed_at)}`
-                  : 'In progress'}
-              </span>
-              <PrimaryButton
-                onClick={() => void handleToggleWorkComplete()}
-                disabled={savingWorkComplete}
-              >
-                {savingWorkComplete
-                  ? 'Updating…'
-                  : ro.technician_completed_at
-                    ? 'Reopen work'
-                    : 'Mark work complete'}
-              </PrimaryButton>
-            </div>
-
-            <form
-              onSubmit={handleSaveOdometer}
-              className="flex flex-wrap items-end gap-2"
-            >
-              <div className="w-64">
-                <Field label="Enter RO Odometer reading (km)">
-                  <input
-                    type="number"
-                    min="0"
-                    value={odometer}
-                    onChange={(e) => setOdometer(e.target.value)}
-                    className={inputClassName}
-                    placeholder="e.g. 48200"
-                  />
-                </Field>
-              </div>
-              <PrimaryButton type="submit" disabled={savingOdometer}>
-                {savingOdometer ? 'Saving…' : 'Save odometer'}
-              </PrimaryButton>
-              {ro.odometer_km !== null && (
-                <span className="pb-2 text-xs text-slate-400">
-                  Saved: {formatKm(ro.odometer_km)}
-                </span>
-              )}
-            </form>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-                <h3 className="text-sm font-bold text-white">Customer</h3>
-                <p className="mt-2 font-semibold text-slate-100">{ro.customers?.name}</p>
-                <p className="text-sm text-slate-300">{ro.customers?.phone ?? 'No phone'}</p>
-                <p className="text-sm text-slate-300">
-                  {ro.customers?.email ?? 'No Email'}
-                </p>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-                <h3 className="text-sm font-bold text-white">Vehicle</h3>
-                <p className="mt-2 font-semibold text-slate-100">
-                  {vehicleLabel(vehicle)}
-                </p>
-                <dl className="mt-2 space-y-1 text-sm">
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-slate-400">Transmission</dt>
-                    <dd className="text-slate-200">{vehicle?.transmission ?? '—'}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-slate-400">Mileage (KM)</dt>
-                    <dd className="text-slate-200">{formatKm(vehicle?.mileage_km)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-slate-400">License Plate</dt>
-                    <dd className="text-slate-200">{vehicle?.license_plate ?? '—'}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-slate-400">VIN</dt>
-                    <dd className="text-slate-200">{vehicle?.vin ?? '—'}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-slate-400">Engine</dt>
-                    <dd className="text-slate-200">{vehicle?.engine ?? '—'}</dd>
-                  </div>
-                </dl>
-                <button
-                  onClick={() => void toggleHistory()}
-                  className="mt-3 text-sm font-semibold text-blue-400 hover:text-blue-300"
-                >
-                  {loadingHistory
-                    ? 'Loading…'
-                    : showHistory
-                      ? 'Hide Vehicle History'
-                      : 'View Vehicle History'}
-                </button>
-                {showHistory && (
-                  <div className="mt-3 space-y-2 border-t border-slate-700 pt-3">
-                    {history.length === 0 ? (
-                      <p className="text-sm text-slate-400">
-                        No prior orders for this vehicle.
-                      </p>
-                    ) : (
-                      history.map((h) => (
-                        <button
-                          key={h.id}
-                          onClick={() => onNavigate({ name: 'repair-order', id: h.id })}
-                          className="block w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-left text-sm hover:border-slate-600"
-                        >
-                          <span className="font-semibold text-blue-400">{h.ro_number}</span>
-                          <span className="text-slate-300"> · {formatDate(h.created_at)}</span>
-                          <span className="ml-2">
-                            <RepairOrderStatusBadge status={h.status} />
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-bold text-white">Inspections</h3>
-                {inspectionSummary.inspection && (
-                  <InspectionStatusBadge status={inspectionSummary.inspection.status} />
-                )}
-              </div>
-              {inspectionSummary.inspection && inspectionSummary.counts ? (
-                <div className="mt-3">
-                  <p className="font-semibold text-slate-100">
-                    {inspectionSummary.inspection.inspection_templates?.name ??
-                      'Comprehensive Inspection'}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    Assigned to {inspectionSummary.inspection.assigned_to ?? 'Unassigned'}
-                    {inspectionSummary.inspection.completed_at
-                      ? ` · Completed ${formatDate(inspectionSummary.inspection.completed_at)}`
-                      : ''}
-                  </p>
-                  <div className="mt-3">
-                    <InspectionCountsRow counts={inspectionSummary.counts} />
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {inspectionSummary.counts.total - inspectionSummary.counts.unmarked} of{' '}
-                    {inspectionSummary.counts.total} items marked
-                  </p>
-                  <PrimaryButton
-                    className="mt-3"
-                    onClick={() =>
-                      onNavigate({
-                        name: 'inspection',
-                        inspectionId: inspectionSummary.inspection!.id,
-                        repairOrderId: ro.id,
-                      })
-                    }
-                  >
-                    Continue
-                  </PrimaryButton>
-                </div>
-              ) : (
-                <div className="mt-3">
-                  <p className="text-sm text-slate-400">
-                    No inspection started for this order yet.
-                  </p>
-                  <PrimaryButton
-                    className="mt-3"
-                    onClick={() => void handleStartInspection()}
-                    disabled={startingInspection}
-                  >
-                    {startingInspection
-                      ? 'Starting…'
-                      : 'Start Comprehensive Inspection'}
-                  </PrimaryButton>
-                </div>
-              )}
-            </div>
-
-            <details className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-              <summary className="cursor-pointer text-sm font-bold text-white">
-                Specifications
-              </summary>
-              <p className="mt-1 text-xs text-slate-400">
-                Often required specifications for this vehicle (from the stored
-                vehicle record).
-              </p>
-              <dl className="mt-2 space-y-1 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-slate-400">Engine</dt>
-                  <dd className="text-slate-200">{vehicle?.engine ?? '—'}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-slate-400">Transmission</dt>
-                  <dd className="text-slate-200">{vehicle?.transmission ?? '—'}</dd>
-                </div>
-              </dl>
-            </details>
-
-            <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-              <h3 className="text-sm font-bold text-white">Shop notes (Internal)</h3>
-              {ro.shop_notes ? (
-                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">
-                  {ro.shop_notes}
-                </p>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">No notes</p>
-              )}
-              <textarea
-                value={shopNotes}
-                onChange={(e) => setShopNotes(e.target.value)}
-                className={`${inputClassName} mt-3`}
-                rows={2}
-                placeholder="Internal notes — not shown to the customer"
-              />
-              <PrimaryButton
-                className="mt-2"
-                onClick={() =>
-                  void handleSaveNotes('shop_notes', shopNotes, setSavingShopNotes)
-                }
-                disabled={savingShopNotes}
-              >
-                {savingShopNotes ? 'Saving…' : 'Save shop notes'}
-              </PrimaryButton>
-            </div>
-
-            <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-              <h3 className="text-sm font-bold text-white">
-                Recommendations for Customer
-              </h3>
-              {ro.customer_recommendations ? (
-                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">
-                  {ro.customer_recommendations}
-                </p>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">No notes</p>
-              )}
-              <textarea
-                value={recommendations}
-                onChange={(e) => setRecommendations(e.target.value)}
-                className={`${inputClassName} mt-3`}
-                rows={2}
-                placeholder="Recommendations to share with the customer"
-              />
-              <PrimaryButton
-                className="mt-2"
-                onClick={() =>
-                  void handleSaveNotes(
-                    'customer_recommendations',
-                    recommendations,
-                    setSavingRecommendations,
-                  )
-                }
-                disabled={savingRecommendations}
-              >
-                {savingRecommendations ? 'Saving…' : 'Save recommendations'}
-              </PrimaryButton>
-            </div>
-          </div>
-        ) : (
-          <ServicesTab
-            repairOrderId={ro.id}
-            services={services}
-            onChanged={load}
-            onError={setError}
-          />
+          </form>
         )}
+
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {REPAIR_ORDER_STATUSES.map((s, index) => (
+            <span
+              key={s}
+              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                index === currentStep
+                  ? 'border-blue-500 bg-blue-600 text-white'
+                  : index < currentStep
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                    : 'border-slate-700 bg-slate-800 text-slate-400'
+              }`}
+            >
+              {REPAIR_ORDER_STATUS_LABELS[s]}
+            </span>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-slate-300">Move to:</span>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as RepairOrderStatus)}
+            className={`${inputClassName} w-auto`}
+          >
+            {REPAIR_ORDER_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {REPAIR_ORDER_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+          <PrimaryButton
+            onClick={() => void handleStatusChange()}
+            disabled={savingStatus || status === ro.status}
+          >
+            {savingStatus ? 'Updating…' : 'Update status'}
+          </PrimaryButton>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-slate-300">
+            Work:{' '}
+            {ro.technician_completed_at
+              ? `Completed ${formatDate(ro.technician_completed_at)}`
+              : 'In progress'}
+          </span>
+          <PrimaryButton
+            onClick={() => void handleToggleWorkComplete()}
+            disabled={savingWorkComplete}
+          >
+            {savingWorkComplete
+              ? 'Updating…'
+              : ro.technician_completed_at
+                ? 'Reopen work'
+                : 'Mark work complete'}
+          </PrimaryButton>
+        </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+      {/* (b) Customer & vehicle summary. */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Card>
+          <div className="flex items-start justify-between gap-2">
+            <h2 className="text-sm font-bold text-white">Customer</h2>
+            <button
+              onClick={() => onNavigate({ name: 'customer', id: ro.customer_id })}
+              className="text-xs font-semibold text-blue-400 hover:text-blue-300"
+            >
+              View customer
+            </button>
+          </div>
+          <p className="mt-2 font-semibold text-slate-100">{ro.customers?.name}</p>
+          <dl className="mt-2 space-y-1 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Phone</dt>
+              <dd className="text-right text-slate-200">{ro.customers?.phone ?? 'No phone'}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Email</dt>
+              <dd className="min-w-0 break-words text-right text-slate-200">
+                {ro.customers?.email ?? 'No Email'}
+              </dd>
+            </div>
+          </dl>
+        </Card>
+        <Card>
+          <h2 className="text-sm font-bold text-white">Vehicle</h2>
+          <p className="mt-2 font-semibold text-slate-100">{vehicleLabel(vehicle)}</p>
+          <dl className="mt-2 space-y-1 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">VIN</dt>
+              <dd className="min-w-0 break-all text-right text-slate-200">{vehicle?.vin ?? '—'}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">License Plate</dt>
+              <dd className="text-right text-slate-200">{vehicle?.license_plate ?? '—'}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Mileage (KM)</dt>
+              <dd className="text-right text-slate-200">{formatKm(vehicle?.mileage_km)}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">RO Odometer</dt>
+              <dd className="text-right text-slate-200">
+                {ro.odometer_km !== null ? formatKm(ro.odometer_km) : '—'}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Transmission</dt>
+              <dd className="text-right text-slate-200">{vehicle?.transmission ?? '—'}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Engine</dt>
+              <dd className="text-right text-slate-200">{vehicle?.engine ?? '—'}</dd>
+            </div>
+          </dl>
+
+          <form onSubmit={handleSaveOdometer} className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="w-full sm:w-56">
+              <Field label="Enter RO Odometer reading (km)">
+                <input
+                  type="number"
+                  min="0"
+                  value={odometer}
+                  onChange={(e) => setOdometer(e.target.value)}
+                  className={inputClassName}
+                  placeholder="e.g. 48200"
+                />
+              </Field>
+            </div>
+            <PrimaryButton type="submit" disabled={savingOdometer}>
+              {savingOdometer ? 'Saving…' : 'Save odometer'}
+            </PrimaryButton>
+            {ro.odometer_km !== null && (
+              <span className="pb-2 text-xs text-slate-400">Saved: {formatKm(ro.odometer_km)}</span>
+            )}
+          </form>
+
+          <button
+            onClick={() => void toggleHistory()}
+            className="mt-3 text-sm font-semibold text-blue-400 hover:text-blue-300"
+          >
+            {loadingHistory
+              ? 'Loading…'
+              : showHistory
+                ? 'Hide Vehicle History'
+                : 'View Vehicle History'}
+          </button>
+          {showHistory && (
+            <div className="mt-3 space-y-2 border-t border-slate-700 pt-3">
+              {history.length === 0 ? (
+                <p className="text-sm text-slate-400">No prior orders for this vehicle.</p>
+              ) : (
+                history.map((h) => (
+                  <button
+                    key={h.id}
+                    onClick={() => onNavigate({ name: 'repair-order', id: h.id })}
+                    className="block w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-left text-sm hover:border-slate-600"
+                  >
+                    <span className="font-semibold text-blue-400">{h.ro_number}</span>
+                    <span className="text-slate-300"> · {formatDate(h.created_at)}</span>
+                    <span className="ml-2">
+                      <RepairOrderStatusBadge status={h.status} />
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* (c) + (d) Services line items and totals. */}
+      <ServicesSection
+        detail={detail}
+        repairOrderId={ro.id}
+        services={services}
+        onChanged={load}
+        onError={setError}
+      />
+
+      {/* (e) Everything else. */}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-base font-bold text-white">Inspections</h3>
+          {inspectionSummary.inspection && (
+            <InspectionStatusBadge status={inspectionSummary.inspection.status} />
+          )}
+        </div>
+        {inspectionSummary.inspection && inspectionSummary.counts ? (
+          <div className="mt-3">
+            <p className="font-semibold text-slate-100">
+              {inspectionSummary.inspection.inspection_templates?.name ??
+                'Comprehensive Inspection'}
+            </p>
+            <p className="text-xs text-slate-400">
+              Assigned to {inspectionSummary.inspection.assigned_to ?? 'Unassigned'}
+              {inspectionSummary.inspection.completed_at
+                ? ` · Completed ${formatDate(inspectionSummary.inspection.completed_at)}`
+                : ''}
+            </p>
+            <div className="mt-3">
+              <InspectionCountsRow counts={inspectionSummary.counts} />
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              {inspectionSummary.counts.total - inspectionSummary.counts.unmarked} of{' '}
+              {inspectionSummary.counts.total} items marked
+            </p>
+            <PrimaryButton
+              className="mt-3"
+              onClick={() =>
+                onNavigate({
+                  name: 'inspection',
+                  inspectionId: inspectionSummary.inspection!.id,
+                  repairOrderId: ro.id,
+                })
+              }
+            >
+              Continue
+            </PrimaryButton>
+          </div>
+        ) : (
+          <div className="mt-3">
+            <p className="text-sm text-slate-400">No inspection started for this order yet.</p>
+            <PrimaryButton
+              className="mt-3"
+              onClick={() => void handleStartInspection()}
+              disabled={startingInspection}
+            >
+              {startingInspection ? 'Starting…' : 'Start Comprehensive Inspection'}
+            </PrimaryButton>
+          </div>
+        )}
+        <details className="mt-4 rounded-lg border border-slate-700 bg-slate-800/60 p-4">
+          <summary className="cursor-pointer text-sm font-bold text-white">Specifications</summary>
+          <p className="mt-1 text-xs text-slate-400">
+            Often required specifications for this vehicle (from the stored vehicle record).
+          </p>
+          <dl className="mt-2 space-y-1 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Engine</dt>
+              <dd className="text-slate-200">{vehicle?.engine ?? '—'}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Transmission</dt>
+              <dd className="text-slate-200">{vehicle?.transmission ?? '—'}</dd>
+            </div>
+          </dl>
+        </details>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
         <EstimatesCard detail={detail} onChanged={load} onError={setError} />
         <InvoicesCard detail={detail} onChanged={load} onError={setError} />
       </div>
 
       <Card>
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-bold text-white">Appointments</h3>
           <PrimaryButton
             onClick={() =>
@@ -663,6 +685,62 @@ export function RepairOrderDetailPage({
       </Card>
 
       <TimelogsCard detail={detail} onChanged={load} onError={setError} onNavigate={onNavigate} />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
+        <Card>
+          <h3 className="text-base font-bold text-white">Shop notes (Internal)</h3>
+          {ro.shop_notes ? (
+            <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">{ro.shop_notes}</p>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">No notes</p>
+          )}
+          <textarea
+            value={shopNotes}
+            onChange={(e) => setShopNotes(e.target.value)}
+            className={`${inputClassName} mt-3`}
+            rows={2}
+            placeholder="Internal notes — not shown to the customer"
+          />
+          <PrimaryButton
+            className="mt-2"
+            onClick={() => void handleSaveNotes('shop_notes', shopNotes, setSavingShopNotes)}
+            disabled={savingShopNotes}
+          >
+            {savingShopNotes ? 'Saving…' : 'Save shop notes'}
+          </PrimaryButton>
+        </Card>
+
+        <Card>
+          <h3 className="text-base font-bold text-white">Recommendations for Customer</h3>
+          {ro.customer_recommendations ? (
+            <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">
+              {ro.customer_recommendations}
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">No notes</p>
+          )}
+          <textarea
+            value={recommendations}
+            onChange={(e) => setRecommendations(e.target.value)}
+            className={`${inputClassName} mt-3`}
+            rows={2}
+            placeholder="Recommendations to share with the customer"
+          />
+          <PrimaryButton
+            className="mt-2"
+            onClick={() =>
+              void handleSaveNotes(
+                'customer_recommendations',
+                recommendations,
+                setSavingRecommendations,
+              )
+            }
+            disabled={savingRecommendations}
+          >
+            {savingRecommendations ? 'Saving…' : 'Save recommendations'}
+          </PrimaryButton>
+        </Card>
+      </div>
     </div>
   )
 }
@@ -764,7 +842,7 @@ function TimelogsCard({
   )
 }
 
-// ---------- Services tab ----------
+// ---------- Services (line items) ----------
 
 interface ServiceFormValues {
   name: string
@@ -806,12 +884,14 @@ function serviceLabor(service: OrderService): number {
   return Number(service.labor_hours) * Number(service.labor_rate)
 }
 
-function ServicesTab({
+function ServicesSection({
+  detail,
   repairOrderId,
   services,
   onChanged,
   onError,
 }: {
+  detail: RepairOrderDetail
   repairOrderId: string
   services: OrderService[]
   onChanged: () => Promise<void>
@@ -825,8 +905,10 @@ function ServicesTab({
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const done = services.filter((s) => s.is_done).length
-  const laborTotal = services.reduce((sum, s) => sum + serviceLabor(s), 0)
-  const partsTotal = services.reduce((sum, s) => sum + Number(s.parts_total), 0)
+  // Same numbers a new estimate prefills with (services, or the order-level
+  // labour/parts fields when there are none) — no separate totals formula.
+  const totals = estimatePrefill(detail)
+  const subtotal = totals.labor + totals.parts
 
   /** Runs a change, then reloads the order detail so the counts update. */
   async function run(id: string | null, action: () => Promise<void>): Promise<boolean> {
@@ -876,118 +958,147 @@ function ServicesTab({
   }
 
   return (
-    <div className="mt-4 flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/60 p-4">
+    <div className="rounded-xl border border-slate-800 bg-slate-900">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 p-4">
         <div>
-          <p className="text-sm font-bold text-white">
-            <span aria-hidden="true">🔧</span> Services {done}/{services.length}
-          </p>
+          <h2 className="text-base font-bold text-white">
+            <span aria-hidden="true">🔧</span> Services
+          </h2>
           <p className="text-xs text-slate-400">
-            Labour {money(laborTotal)} · Parts {money(partsTotal)} · Total{' '}
-            {money(laborTotal + partsTotal)}
+            {services.length === 0 ? 'No lines yet' : `${done} of ${services.length} done`}
           </p>
         </div>
-        <PrimaryButton onClick={() => setShowAdd((v) => !v)}>
-          {showAdd ? 'Cancel' : 'Add service'}
+        <PrimaryButton
+          onClick={() => {
+            setShowAdd((v) => !v)
+            setAddValues(EMPTY_SERVICE_FORM)
+          }}
+        >
+          {showAdd ? 'Cancel' : '+ Add service'}
         </PrimaryButton>
       </div>
 
-      {showAdd && (
-        <form
-          onSubmit={handleAdd}
-          className="rounded-lg border border-slate-700 bg-slate-800/60 p-4"
-        >
-          <ServiceFormFields values={addValues} onChange={setAddValues} />
-          <PrimaryButton
-            type="submit"
-            className="mt-3"
-            disabled={adding || addValues.name.trim() === ''}
-          >
-            {adding ? 'Adding…' : 'Save service'}
-          </PrimaryButton>
-        </form>
-      )}
-
-      {services.length === 0 ? (
-        <EmptyState message="No services on this order yet. Use Add service to add the first one." />
+      {services.length === 0 && !showAdd ? (
+        <div className="p-4">
+          <EmptyState message="No services on this order yet. Use Add service to add the first one." />
+        </div>
       ) : (
-        <div className="space-y-2">
+        <ul className="divide-y divide-slate-800">
           {services.map((service) =>
             editingId === service.id ? (
-              <form
-                key={service.id}
-                onSubmit={handleSaveEdit}
-                className="rounded-lg border border-blue-500/50 bg-slate-800/60 p-4"
-              >
-                <ServiceFormFields values={editValues} onChange={setEditValues} />
-                <div className="mt-3 flex gap-2">
-                  <PrimaryButton
-                    type="submit"
-                    disabled={busyId === service.id || editValues.name.trim() === ''}
-                  >
-                    {busyId === service.id ? 'Saving…' : 'Save'}
-                  </PrimaryButton>
-                  <SecondaryButton onClick={() => setEditingId(null)}>Cancel</SecondaryButton>
-                </div>
-              </form>
+              <li key={service.id} className="bg-slate-800/40 p-4">
+                <form onSubmit={handleSaveEdit}>
+                  <ServiceFormFields values={editValues} onChange={setEditValues} />
+                  <div className="mt-3 flex gap-2">
+                    <PrimaryButton
+                      type="submit"
+                      disabled={busyId === service.id || editValues.name.trim() === ''}
+                    >
+                      {busyId === service.id ? 'Saving…' : 'Save'}
+                    </PrimaryButton>
+                    <SecondaryButton onClick={() => setEditingId(null)}>Cancel</SecondaryButton>
+                  </div>
+                </form>
+              </li>
             ) : (
-              <div
-                key={service.id}
-                className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/60 p-4"
-              >
+              <li key={service.id} className="flex items-start gap-3 p-4">
+                <input
+                  type="checkbox"
+                  checked={service.is_done}
+                  onChange={() => handleToggleDone(service)}
+                  disabled={busyId === service.id}
+                  aria-label={`Mark "${service.name}" ${service.is_done ? 'not done' : 'done'}`}
+                  className="mt-1 h-5 w-5 shrink-0 accent-emerald-500"
+                />
                 <div className="min-w-0 flex-1">
-                  <p
-                    className={`font-semibold ${
-                      service.is_done ? 'text-slate-400 line-through' : 'text-slate-100'
-                    }`}
-                  >
-                    {service.name}
-                  </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p
+                      className={`break-words font-semibold ${
+                        service.is_done ? 'text-slate-400 line-through' : 'text-slate-100'
+                      }`}
+                    >
+                      {service.name}
+                    </p>
+                    <span className="shrink-0 font-bold text-white">
+                      {money(serviceLabor(service) + Number(service.parts_total))}
+                    </span>
+                  </div>
                   {service.description && (
-                    <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-400">
+                    <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-400">
                       {service.description}
                     </p>
                   )}
-                  <p className="mt-1 text-xs text-slate-300">
-                    Labour {Number(service.labor_hours)} h × {money(Number(service.labor_rate))}{' '}
-                    = {money(serviceLabor(service))} · Parts{' '}
-                    {money(Number(service.parts_total))}
-                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-300">
+                    <span>
+                      Labour {Number(service.labor_hours)} h × {money(Number(service.labor_rate))}{' '}
+                      = {money(serviceLabor(service))}
+                    </span>
+                    <span>Parts {money(Number(service.parts_total))}</span>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => handleToggleDone(service)}
-                    disabled={busyId === service.id}
-                    aria-pressed={service.is_done}
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold disabled:opacity-50 ${
-                      service.is_done
-                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                        : 'border-slate-600 bg-slate-800 text-slate-300 hover:border-slate-500'
-                    }`}
-                  >
-                    {service.is_done ? '✓ Done' : 'Not done'}
-                  </button>
-                  <SecondaryButton
-                    onClick={() => {
-                      setEditingId(service.id)
-                      setEditValues(serviceToForm(service))
-                    }}
-                    disabled={busyId === service.id}
-                  >
-                    Edit
-                  </SecondaryButton>
-                  <SecondaryButton
-                    onClick={() => handleDelete(service)}
-                    disabled={busyId === service.id}
-                  >
-                    Delete
-                  </SecondaryButton>
-                </div>
-              </div>
+                <OverflowMenu
+                  label={`Actions for ${service.name}`}
+                  disabled={busyId === service.id}
+                  items={[
+                    {
+                      label: 'Edit',
+                      onSelect: () => {
+                        setEditingId(service.id)
+                        setEditValues(serviceToForm(service))
+                      },
+                    },
+                    { label: 'Delete', danger: true, onSelect: () => handleDelete(service) },
+                  ]}
+                />
+              </li>
             ),
           )}
-        </div>
+          {showAdd && (
+            <li className="bg-slate-800/40 p-4">
+              <form onSubmit={handleAdd}>
+                <ServiceFormFields values={addValues} onChange={setAddValues} />
+                <PrimaryButton
+                  type="submit"
+                  className="mt-3"
+                  disabled={adding || addValues.name.trim() === ''}
+                >
+                  {adding ? 'Adding…' : 'Save service'}
+                </PrimaryButton>
+              </form>
+            </li>
+          )}
+        </ul>
       )}
+
+      <dl className="space-y-1 border-t border-slate-800 bg-slate-950/40 p-4 text-sm">
+        {services.length === 0 && (
+          <p className="pb-1 text-xs text-slate-500">
+            No services — totals come from the order&apos;s labour and parts fields.
+          </p>
+        )}
+        <div className="flex justify-between gap-4">
+          <dt className="text-slate-400">Labour</dt>
+          <dd className="text-slate-200">{money(totals.labor)}</dd>
+        </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-slate-400">Parts</dt>
+          <dd className="text-slate-200">{money(totals.parts)}</dd>
+        </div>
+        <div className="flex justify-between gap-4 border-t border-slate-800 pt-1">
+          <dt className="text-slate-300">Subtotal</dt>
+          <dd className="font-semibold text-white">{money(subtotal)}</dd>
+        </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-slate-400">
+            Tax <span className="text-xs text-slate-500">(entered on the estimate / invoice)</span>
+          </dt>
+          <dd className="text-slate-200">{money(0)}</dd>
+        </div>
+        <div className="flex justify-between gap-4 border-t border-slate-800 pt-1 text-base">
+          <dt className="font-bold text-white">Total</dt>
+          <dd className="font-bold text-white">{money(subtotal)}</dd>
+        </div>
+      </dl>
     </div>
   )
 }
@@ -1003,8 +1114,8 @@ function ServiceFormFields({
     onChange({ ...values, [key]: value })
   }
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-      <div className="md:col-span-3">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="col-span-2 sm:col-span-3">
         <Field label="Service name">
           <input
             required
@@ -1015,7 +1126,7 @@ function ServiceFormFields({
           />
         </Field>
       </div>
-      <div className="md:col-span-3">
+      <div className="col-span-2 sm:col-span-3">
         <Field label="Description">
           <textarea
             value={values.description}
@@ -1288,7 +1399,7 @@ function EstimatesCard({
                 {est.notes && (
                   <p className="mt-1 whitespace-pre-wrap text-xs text-slate-400">{est.notes}</p>
                 )}
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   {ESTIMATE_STATUS_TRANSITIONS[est.status].map((next) => (
                     <SecondaryButton
                       key={next}
@@ -1299,28 +1410,27 @@ function EstimatesCard({
                     </SecondaryButton>
                   ))}
                   {est.status === 'draft' && (
-                    <>
-                      <SecondaryButton
-                        onClick={() => {
-                          setEditingId(est.id)
-                          setEditValues({
-                            labor: String(est.labor_total),
-                            parts: String(est.parts_total),
-                            tax: String(est.tax),
-                            notes: est.notes ?? '',
-                          })
-                        }}
+                    <div className="ml-auto">
+                      <OverflowMenu
+                        label="Estimate actions"
                         disabled={busyId === est.id}
-                      >
-                        Edit
-                      </SecondaryButton>
-                      <SecondaryButton
-                        onClick={() => handleDelete(est)}
-                        disabled={busyId === est.id}
-                      >
-                        Delete
-                      </SecondaryButton>
-                    </>
+                        items={[
+                          {
+                            label: 'Edit',
+                            onSelect: () => {
+                              setEditingId(est.id)
+                              setEditValues({
+                                labor: String(est.labor_total),
+                                parts: String(est.parts_total),
+                                tax: String(est.tax),
+                                notes: est.notes ?? '',
+                              })
+                            },
+                          },
+                          { label: 'Delete', danger: true, onSelect: () => handleDelete(est) },
+                        ]}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -1519,7 +1629,7 @@ function InvoicesCard({
                     ? ` · Paid ${formatDate(inv.paid_at)}`
                     : ''}
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   <SecondaryButton onClick={() => setPrintingId(inv.id)}>Print</SecondaryButton>
                   {INVOICE_STATUS_TRANSITIONS[inv.status].map((next) => (
                     <SecondaryButton
@@ -1531,26 +1641,25 @@ function InvoicesCard({
                     </SecondaryButton>
                   ))}
                   {inv.status === 'draft' && (
-                    <>
-                      <SecondaryButton
-                        onClick={() => {
-                          setEditingId(inv.id)
-                          setEditValues({
-                            subtotal: String(inv.subtotal),
-                            tax: String(inv.tax),
-                          })
-                        }}
+                    <div className="ml-auto">
+                      <OverflowMenu
+                        label={`Actions for ${inv.invoice_number}`}
                         disabled={busyId === inv.id}
-                      >
-                        Edit
-                      </SecondaryButton>
-                      <SecondaryButton
-                        onClick={() => handleDelete(inv)}
-                        disabled={busyId === inv.id}
-                      >
-                        Delete
-                      </SecondaryButton>
-                    </>
+                        items={[
+                          {
+                            label: 'Edit',
+                            onSelect: () => {
+                              setEditingId(inv.id)
+                              setEditValues({
+                                subtotal: String(inv.subtotal),
+                                tax: String(inv.tax),
+                              })
+                            },
+                          },
+                          { label: 'Delete', danger: true, onSelect: () => handleDelete(inv) },
+                        ]}
+                      />
+                    </div>
                   )}
                 </div>
               </div>

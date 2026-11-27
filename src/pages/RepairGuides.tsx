@@ -24,6 +24,7 @@ import {
   SecondaryButton,
   inputClassName,
 } from '../components/ui'
+import { OverflowMenu } from '../components/OverflowMenu'
 
 interface FormValues {
   title: string
@@ -332,12 +333,15 @@ export function RepairGuides() {
               <h2 className="mt-2 break-words text-2xl font-bold text-white">{selected.title}</h2>
               <p className="mt-1 text-sm text-slate-400">Applies to: {appliesTo(selected)}</p>
             </div>
-            <div className="flex gap-2">
-              <SecondaryButton onClick={() => openEdit(selected)}>Edit</SecondaryButton>
-              {!confirmDelete && (
-                <SecondaryButton onClick={() => setConfirmDelete(true)}>Delete</SecondaryButton>
-              )}
-            </div>
+            <OverflowMenu
+              label={`Actions for ${selected.title}`}
+              items={[
+                { label: 'Edit', onSelect: () => openEdit(selected) },
+                ...(confirmDelete
+                  ? []
+                  : [{ label: 'Delete', danger: true, onSelect: () => setConfirmDelete(true) }]),
+              ]}
+            />
           </div>
 
           {confirmDelete && (

@@ -14,87 +14,34 @@ import {
   Card,
   EmptyState,
   ErrorBanner,
-  Field,
   LoadingState,
   PrimaryButton,
   SecondaryButton,
-  inputClassName,
 } from '../components/ui'
+import { OverflowMenu } from '../components/OverflowMenu'
+import {
+  CustomerFormFields,
+  EMPTY_CUSTOMER,
+  EMPTY_VEHICLE,
+  VehicleFormFields,
+  confirmDeleteCustomer,
+  confirmDeleteVehicle,
+  customerToForm,
+  message,
+  vehicleFields,
+  vehicleToForm,
+  type CustomerFormValues,
+  type VehicleFormValues,
+} from '../components/customerForms'
+import type { View } from '../components/Layout'
 
-interface CustomerFormValues {
-  name: string
-  phone: string
-  email: string
-  notes: string
-}
-
-interface VehicleFormValues {
-  year: string
-  make: string
-  model: string
-  trim: string
-  transmission: string
-  engine: string
-  vin: string
-  licensePlate: string
-  mileageKm: string
-}
-
-const EMPTY_CUSTOMER: CustomerFormValues = { name: '', phone: '', email: '', notes: '' }
-const EMPTY_VEHICLE: VehicleFormValues = {
-  year: '',
-  make: '',
-  model: '',
-  trim: '',
-  transmission: '',
-  engine: '',
-  vin: '',
-  licensePlate: '',
-  mileageKm: '',
-}
-
-function customerToForm(c: Customer): CustomerFormValues {
-  return { name: c.name, phone: c.phone ?? '', email: c.email ?? '', notes: c.notes ?? '' }
-}
-
-function vehicleToForm(v: Vehicle): VehicleFormValues {
-  return {
-    year: v.year === null ? '' : String(v.year),
-    make: v.make,
-    model: v.model,
-    trim: v.trim ?? '',
-    transmission: v.transmission ?? '',
-    engine: v.engine ?? '',
-    vin: v.vin ?? '',
-    licensePlate: v.license_plate ?? '',
-    mileageKm: v.mileage_km === null ? '' : String(v.mileage_km),
-  }
-}
-
-/** Blank → not set; anything else → a number (an invalid one is refused by data.ts). */
-function optionalNumber(value: string): number | null {
-  return value.trim() === '' ? null : Number(value)
-}
-
-function vehicleFields(values: VehicleFormValues) {
-  return {
-    year: optionalNumber(values.year),
-    make: values.make.trim(),
-    model: values.model.trim(),
-    trim: values.trim.trim(),
-    transmission: values.transmission.trim(),
-    engine: values.engine.trim(),
-    vin: values.vin.trim(),
-    license_plate: values.licensePlate.trim(),
-    mileage_km: optionalNumber(values.mileageKm),
-  }
-}
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}) {
+export function Customers({
+  focusCustomerId,
+  onNavigate,
+}: {
+  focusCustomerId?: string
+  onNavigate: (view: View) => void
+}) {
   const [customers, setCustomers] = useState<CustomerWithVehicles[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -143,7 +90,7 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
     }
   }, [])
 
-  // Opened from an appointment's customer link: bring that customer into view.
+  // Back from a customer's detail view: bring that customer into view.
   useEffect(() => {
     if (loading || !focusCustomerId) return
     document
@@ -218,14 +165,7 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
   }
 
   function handleDeleteCustomer(customer: CustomerWithVehicles) {
-    const n = customer.vehicles.length
-    const goesWith =
-      n === 0
-        ? 'Their appointments are deleted too.'
-        : `Their ${n === 1 ? 'vehicle' : `${n} vehicles`} and appointments are deleted too.`
-    if (!window.confirm(`Delete customer "${customer.name}"? ${goesWith} This cannot be undone.`)) {
-      return
-    }
+    if (!confirmDeleteCustomer(customer)) return
     void run(customer.id, customer.id, () => deleteCustomer(customer.id))
   }
 
@@ -245,21 +185,19 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
   }
 
   function handleDeleteVehicle(vehicle: Vehicle) {
-    if (
-      !window.confirm(
-        `Delete vehicle "${vehicleLabel(vehicle)}"? Its appointments stay, with the vehicle cleared. This cannot be undone.`,
-      )
-    ) {
-      return
-    }
+    if (!confirmDeleteVehicle(vehicle)) return
     void run(vehicle.customer_id, vehicle.id, () => deleteVehicle(vehicle.id))
+  }
+
+  function openCustomer(customerId: string) {
+    onNavigate({ name: 'customer', id: customerId })
   }
 
   if (loading) return <LoadingState message="Loading customers…" />
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-white">Customers &amp; Vehicles</h1>
         <PrimaryButton onClick={() => setShowCustomerForm((v) => !v)}>
           {showCustomerForm ? 'Cancel' : 'New Customer'}
@@ -308,9 +246,22 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
                   </div>
                 </form>
               ) : (
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-bold text-white">{customer.name}</h3>
+                <div className="flex items-start justify-between gap-2">
+                  {/* The whole summary opens the customer; the name is the keyboard target. */}
+                  <div
+                    className="min-w-0 flex-1 cursor-pointer"
+                    onClick={() => openCustomer(customer.id)}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openCustomer(customer.id)
+                      }}
+                      className="text-left text-lg font-bold text-white hover:text-blue-300"
+                    >
+                      {customer.name}
+                    </button>
                     <p className="text-xs text-slate-400">
                       {customer.phone ?? 'No phone'}
                       {customer.email ? ` · ${customer.email}` : ''}
@@ -319,7 +270,7 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
                       <p className="mt-1 text-xs text-slate-500">{customer.notes}</p>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     <SecondaryButton
                       onClick={() =>
                         setVehicleFormFor((v) => (v === customer.id ? null : customer.id))
@@ -327,18 +278,18 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
                     >
                       {vehicleFormFor === customer.id ? 'Cancel' : 'Add Vehicle'}
                     </SecondaryButton>
-                    <SecondaryButton
-                      onClick={() => startEditCustomer(customer)}
+                    <OverflowMenu
+                      label={`Actions for ${customer.name}`}
                       disabled={busyId === customer.id}
-                    >
-                      Edit
-                    </SecondaryButton>
-                    <SecondaryButton
-                      onClick={() => handleDeleteCustomer(customer)}
-                      disabled={busyId === customer.id}
-                    >
-                      {busyId === customer.id ? 'Deleting…' : 'Delete'}
-                    </SecondaryButton>
+                      items={[
+                        { label: 'Edit', onSelect: () => startEditCustomer(customer) },
+                        {
+                          label: busyId === customer.id ? 'Deleting…' : 'Delete',
+                          danger: true,
+                          onSelect: () => handleDeleteCustomer(customer),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
               )}
@@ -380,30 +331,29 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
                     ) : (
                       <div
                         key={v.id}
-                        className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-sm"
+                        onClick={() => openCustomer(customer.id)}
+                        className="flex cursor-pointer items-start justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-sm hover:border-slate-600"
                       >
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-100">{vehicleLabel(v)}</div>
-                          <div className="text-xs text-slate-400">
+                          <div className="break-words text-xs text-slate-400">
                             {[v.transmission, v.engine, v.vin ? `VIN ${v.vin}` : null, v.license_plate, v.mileage_km !== null ? `${v.mileage_km.toLocaleString()} km` : null]
                               .filter(Boolean)
                               .join(' · ') || 'No details recorded'}
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <SecondaryButton
-                            onClick={() => startEditVehicle(v)}
-                            disabled={busyId === v.id}
-                          >
-                            Edit
-                          </SecondaryButton>
-                          <SecondaryButton
-                            onClick={() => handleDeleteVehicle(v)}
-                            disabled={busyId === v.id}
-                          >
-                            {busyId === v.id ? 'Deleting…' : 'Delete'}
-                          </SecondaryButton>
-                        </div>
+                        <OverflowMenu
+                          label={`Actions for ${vehicleLabel(v)}`}
+                          disabled={busyId === v.id}
+                          items={[
+                            { label: 'Edit', onSelect: () => startEditVehicle(v) },
+                            {
+                              label: busyId === v.id ? 'Deleting…' : 'Delete',
+                              danger: true,
+                              onSelect: () => handleDeleteVehicle(v),
+                            },
+                          ]}
+                        />
                       </div>
                     ),
                   )
@@ -428,147 +378,5 @@ export function Customers({ focusCustomerId }: { focusCustomerId?: string } = {}
         </div>
       )}
     </div>
-  )
-}
-
-/** Name, phone, email, notes: the same fields for create and edit. */
-function CustomerFormFields({
-  values,
-  onChange,
-}: {
-  values: CustomerFormValues
-  onChange: (values: CustomerFormValues) => void
-}) {
-  const set = (key: keyof CustomerFormValues, value: string) => onChange({ ...values, [key]: value })
-  return (
-    <>
-      <Field label="Full name">
-        <input
-          required
-          value={values.name}
-          onChange={(e) => set('name', e.target.value)}
-          className={inputClassName}
-          placeholder="e.g. Marcus Vance"
-        />
-      </Field>
-      <Field label="Phone">
-        <input
-          value={values.phone}
-          onChange={(e) => set('phone', e.target.value)}
-          className={inputClassName}
-          placeholder="(555) 000-0000"
-        />
-      </Field>
-      <Field label="Email">
-        <input
-          type="email"
-          value={values.email}
-          onChange={(e) => set('email', e.target.value)}
-          className={inputClassName}
-          placeholder="customer@example.com"
-        />
-      </Field>
-      <Field label="Notes">
-        <input
-          value={values.notes}
-          onChange={(e) => set('notes', e.target.value)}
-          className={inputClassName}
-          placeholder="Optional note"
-        />
-      </Field>
-    </>
-  )
-}
-
-/** The add-vehicle fields, also used for edit. */
-function VehicleFormFields({
-  values,
-  onChange,
-  maxYear,
-}: {
-  values: VehicleFormValues
-  onChange: (values: VehicleFormValues) => void
-  maxYear: number
-}) {
-  const set = (key: keyof VehicleFormValues, value: string) => onChange({ ...values, [key]: value })
-  return (
-    <>
-      <Field label="Year">
-        <input
-          type="number"
-          min="1900"
-          max={String(maxYear)}
-          value={values.year}
-          onChange={(e) => set('year', e.target.value)}
-          className={inputClassName}
-          placeholder="2021"
-        />
-      </Field>
-      <Field label="Make">
-        <input
-          required
-          value={values.make}
-          onChange={(e) => set('make', e.target.value)}
-          className={inputClassName}
-          placeholder="Ford"
-        />
-      </Field>
-      <Field label="Model">
-        <input
-          required
-          value={values.model}
-          onChange={(e) => set('model', e.target.value)}
-          className={inputClassName}
-          placeholder="F-150"
-        />
-      </Field>
-      <Field label="Trim">
-        <input
-          value={values.trim}
-          onChange={(e) => set('trim', e.target.value)}
-          className={inputClassName}
-          placeholder="XLT"
-        />
-      </Field>
-      <Field label="Transmission">
-        <input
-          value={values.transmission}
-          onChange={(e) => set('transmission', e.target.value)}
-          className={inputClassName}
-          placeholder="Automatic"
-        />
-      </Field>
-      <Field label="Engine">
-        <input
-          value={values.engine}
-          onChange={(e) => set('engine', e.target.value)}
-          className={inputClassName}
-          placeholder="3.5L Hybrid"
-        />
-      </Field>
-      <Field label="VIN">
-        <input
-          value={values.vin}
-          onChange={(e) => set('vin', e.target.value)}
-          className={inputClassName}
-        />
-      </Field>
-      <Field label="License plate">
-        <input
-          value={values.licensePlate}
-          onChange={(e) => set('licensePlate', e.target.value)}
-          className={inputClassName}
-        />
-      </Field>
-      <Field label="Mileage (KM)">
-        <input
-          type="number"
-          min="0"
-          value={values.mileageKm}
-          onChange={(e) => set('mileageKm', e.target.value)}
-          className={inputClassName}
-        />
-      </Field>
-    </>
   )
 }

@@ -302,6 +302,8 @@ export async function setRepairOrderWorkCompleted(
 export interface RepairOrderFieldUpdates {
   odometer_km?: number | null
   priority?: RepairOrderPriority
+  technician?: string | null
+  bay?: string | null
   shop_notes?: string | null
   customer_recommendations?: string | null
 }
@@ -1507,6 +1509,51 @@ export async function fetchCustomers(): Promise<CustomerWithVehicles[]> {
     .order('name', { ascending: true })
   throwIfError(error, 'Failed to load customers')
   return (data ?? []) as CustomerWithVehicles[]
+}
+
+export interface CustomerDetail {
+  customer: CustomerWithVehicles
+  /** Newest first. */
+  orders: RepairOrder[]
+  appointments: Appointment[]
+  /** Invoices on any of the customer's orders, newest first. */
+  invoices: Invoice[]
+}
+
+/** Everything shown on the customer detail view (read-only queries). */
+export async function fetchCustomerDetail(id: string): Promise<CustomerDetail> {
+  const client = requireClient()
+  const [customer, orders, appointments] = await Promise.all([
+    client.from('customers').select('*, vehicles(*)').eq('id', id).single(),
+    client
+      .from('repair_orders')
+      .select(RO_SELECT)
+      .eq('customer_id', id)
+      .order('created_at', { ascending: false }),
+    fetchAppointmentsByCustomer(id),
+  ])
+  throwIfError(customer.error, 'Failed to load customer')
+  throwIfError(orders.error, 'Failed to load orders')
+  const orderRows = (orders.data ?? []) as RepairOrder[]
+  let invoices: Invoice[] = []
+  if (orderRows.length > 0) {
+    const { data, error } = await client
+      .from('invoices')
+      .select('*')
+      .in(
+        'repair_order_id',
+        orderRows.map((o) => o.id),
+      )
+      .order('created_at', { ascending: false })
+    throwIfError(error, 'Failed to load invoices')
+    invoices = (data ?? []) as Invoice[]
+  }
+  return {
+    customer: customer.data as CustomerWithVehicles,
+    orders: orderRows,
+    appointments,
+    invoices,
+  }
 }
 
 export async function fetchCustomerList(): Promise<Customer[]> {

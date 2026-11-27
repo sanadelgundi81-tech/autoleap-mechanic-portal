@@ -19,6 +19,7 @@ export type View =
   | { name: 'timelogs' }
   | { name: 'earnings' }
   | { name: 'customers'; focusCustomerId?: string }
+  | { name: 'customer'; id: string }
   | { name: 'import' }
   | { name: 'guides' }
 
@@ -34,7 +35,7 @@ const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'guides', label: 'Repair Guides' },
 ]
 
-/** Unread count shown next to Notifications in both navs. */
+/** Unread count shown next to Notifications in the nav. */
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null
   return (
@@ -62,7 +63,7 @@ export function Layout({
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-4">
+      <header className="flex items-center justify-between gap-3 border-b border-slate-800 bg-slate-900 px-4 py-3 md:px-6 md:py-4">
         <div className="flex items-center space-x-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-xl font-bold text-white">
             AL
@@ -88,43 +89,25 @@ export function Layout({
         </div>
       </header>
 
-      <div className="flex flex-1">
-        <nav className="hidden w-52 shrink-0 flex-col gap-1 border-r border-slate-800 bg-slate-900/60 p-4 md:flex">
-          {NAV_ITEMS.map((item) => {
-            const active =
-              view.name === item.name ||
-              (item.name === 'repair-orders' && view.name === 'repair-order')
-            return (
-              <button
-                key={item.name}
-                onClick={() => onNavigate({ name: item.name } as View)}
-                className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
-                  active
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                {item.label}
-                {item.name === 'notifications' && <UnreadBadge count={unreadCount} />}
-              </button>
-            )
-          })}
-        </nav>
-
-        <main className="flex-1 p-6 pb-20 md:pb-6">{children}</main>
-      </div>
-
-      {/* Nine items: keep them on one line and let the bar scroll sideways on narrow phones. */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between gap-4 overflow-x-auto whitespace-nowrap border-t border-slate-800 bg-slate-900 px-4 py-2.5 text-xs md:hidden">
+      {/* One top nav on every screen size: sticky (not a fixed overlay), so nothing sits under it.
+          Nine items stay on one line; the bar scrolls sideways on narrow phones. */}
+      <nav
+        aria-label="Main"
+        className="sticky top-0 z-40 flex items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-slate-800 bg-slate-900/95 px-3 py-2 backdrop-blur md:px-6"
+      >
         {NAV_ITEMS.map((item) => {
           const active =
             view.name === item.name ||
-            (item.name === 'repair-orders' && view.name === 'repair-order')
+            (item.name === 'repair-orders' && view.name === 'repair-order') ||
+            (item.name === 'customers' && view.name === 'customer')
           return (
             <button
               key={item.name}
               onClick={() => onNavigate({ name: item.name } as View)}
-              className={`shrink-0 font-semibold ${active ? 'text-blue-400' : 'text-slate-300'}`}
+              aria-current={active ? 'page' : undefined}
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+              }`}
             >
               {item.label}
               {item.name === 'notifications' && <UnreadBadge count={unreadCount} />}
@@ -132,6 +115,8 @@ export function Layout({
           )
         })}
       </nav>
+
+      <main className="flex-1 p-4 pb-6 md:p-6">{children}</main>
     </div>
   )
 }
