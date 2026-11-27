@@ -58,7 +58,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <Card>
-          <div className="text-xs font-medium text-slate-400">Active Repair Orders</div>
+          <div className="text-xs font-medium text-slate-400">Active Orders</div>
           <div className="mt-1 text-xl font-bold text-white">
             {stats ? `${stats.activeRepairOrders} in shop` : '—'}
           </div>
@@ -78,7 +78,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
           <div className="mt-1 text-xl font-bold text-amber-400">
             {stats ? hours(stats.billedHours) : '—'}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Across all repair orders</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">Across all orders</div>
         </Card>
         <Card>
           <div className="text-xs font-medium text-slate-400">
@@ -100,7 +100,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
           <Card className="flex flex-col gap-4">
             <SectionTitle>Bay Queue — Assigned Orders</SectionTitle>
             {activeRos.length === 0 ? (
-              <EmptyState message="No assigned repair orders. Create one from the Repair Orders page." />
+              <EmptyState message="No assigned orders. Create one from the Orders page." />
             ) : (
               <div className="space-y-3">
                 {activeRos.map((ro) => (

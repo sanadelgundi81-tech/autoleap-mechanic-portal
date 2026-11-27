@@ -14,12 +14,12 @@ import {
   ErrorBanner,
   LoadingState,
   PrimaryButton,
-  SecondaryButton,
 } from '../components/ui'
+import { OverflowMenu } from '../components/OverflowMenu'
 import type { View } from '../components/Layout'
 
 const RELATED_LABELS: Record<NotificationRelatedType, string> = {
-  repair_order: 'repair order',
+  repair_order: 'order',
   appointment: 'appointment',
   customer: 'customer',
   estimate: 'estimate',
@@ -29,7 +29,7 @@ const RELATED_LABELS: Record<NotificationRelatedType, string> = {
 function targetView(target: NotificationTarget): View {
   if (target.kind === 'repair_order') return { name: 'repair-order', id: target.id }
   if (target.kind === 'appointment') return { name: 'appointments', focusAppointmentId: target.id }
-  return { name: 'customers', focusCustomerId: target.id }
+  return { name: 'customer', id: target.id }
 }
 
 export function Notifications({
@@ -153,19 +153,21 @@ export function Notifications({
           {n.body && <p className="mt-0.5 text-sm text-slate-400">{n.body}</p>}
           <p className="mt-1 text-xs text-slate-500">{formatDateTime(n.created_at)}</p>
         </button>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
-          {!n.is_read && (
-            <SecondaryButton
-              onClick={() => void run(n.id, () => markNotificationRead(n.id))}
-              disabled={busyId === n.id}
-            >
-              Mark read
-            </SecondaryButton>
-          )}
-          <SecondaryButton onClick={() => handleDelete(n)} disabled={busyId === n.id}>
-            Delete
-          </SecondaryButton>
-        </div>
+        <OverflowMenu
+          label="Notification actions"
+          disabled={busyId === n.id}
+          items={[
+            ...(n.is_read
+              ? []
+              : [
+                  {
+                    label: 'Mark read',
+                    onSelect: () => void run(n.id, () => markNotificationRead(n.id)),
+                  },
+                ]),
+            { label: 'Delete', danger: true, onSelect: () => handleDelete(n) },
+          ]}
+        />
       </div>
     )
   }

@@ -21,6 +21,10 @@ const Import = lazy(() => import('./pages/Import').then((m) => ({ default: m.Imp
 const RepairGuides = lazy(() =>
   import('./pages/RepairGuides').then((m) => ({ default: m.RepairGuides })),
 )
+// Customer detail loads on demand too.
+const CustomerDetailPage = lazy(() =>
+  import('./pages/CustomerDetail').then((m) => ({ default: m.CustomerDetailPage })),
+)
 
 function SetupNotice() {
   return (
@@ -123,7 +127,14 @@ function Shell() {
       {view.name === 'notifications' && (
         <Notifications onNavigate={setView} onUnreadChange={refreshUnread} />
       )}
-      {view.name === 'customers' && <Customers focusCustomerId={view.focusCustomerId} />}
+      {view.name === 'customers' && (
+        <Customers focusCustomerId={view.focusCustomerId} onNavigate={setView} />
+      )}
+      {view.name === 'customer' && (
+        <Suspense fallback={<LoadingState message="Loading customer…" />}>
+          <CustomerDetailPage key={view.id} id={view.id} onNavigate={setView} />
+        </Suspense>
+      )}
       {view.name === 'import' && (
         <Suspense fallback={<LoadingState message="Loading import…" />}>
           <Import />

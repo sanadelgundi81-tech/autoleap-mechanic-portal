@@ -65,9 +65,9 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
       .in('state', ['attention', 'failed']),
   ])
 
-  throwIfError(activeRos.error, 'Failed to load active repair orders')
+  throwIfError(activeRos.error, 'Failed to load active orders')
   throwIfError(paidInvoices.error, 'Failed to load paid invoices')
-  throwIfError(allRos.error, 'Failed to load repair orders')
+  throwIfError(allRos.error, 'Failed to load orders')
   throwIfError(findings.error, 'Failed to load inspection findings')
 
   const collected = (paidInvoices.data ?? []).reduce(
@@ -132,7 +132,7 @@ export async function fetchRepairOrders(): Promise<RepairOrder[]> {
     .from('repair_orders')
     .select(RO_SELECT)
     .order('created_at', { ascending: true })
-  throwIfError(error, 'Failed to load repair orders')
+  throwIfError(error, 'Failed to load orders')
   return (data ?? []) as RepairOrder[]
 }
 
@@ -143,7 +143,7 @@ export async function fetchActiveRepairOrders(): Promise<RepairOrder[]> {
     .select(RO_SELECT)
     .is('technician_completed_at', null)
     .order('created_at', { ascending: true })
-  throwIfError(error, 'Failed to load active repair orders')
+  throwIfError(error, 'Failed to load active orders')
   return (data ?? []) as RepairOrder[]
 }
 
@@ -199,7 +199,7 @@ export async function fetchRepairOrderDetail(id: string): Promise<RepairOrderDet
     fetchTimelogsByRepairOrder(id),
   ])
 
-  throwIfError(ro.error, 'Failed to load repair order')
+  throwIfError(ro.error, 'Failed to load order')
   throwIfError(estimates.error, 'Failed to load estimates')
   throwIfError(invoices.error, 'Failed to load invoices')
   throwIfError(inspection.error, 'Failed to load inspection')
@@ -243,7 +243,7 @@ export async function createRepairOrder(input: NewRepairOrderInput): Promise<Rep
     .insert({ ...input, status: 'estimate' })
     .select(RO_SELECT)
     .single()
-  throwIfError(error, 'Failed to create repair order')
+  throwIfError(error, 'Failed to create order')
   return data as RepairOrder
 }
 
@@ -262,11 +262,11 @@ export async function updateRepairOrderStatus(
       .select('status, ro_number')
       .eq('id', id)
       .single()
-    throwIfError(readError, 'Failed to load repair order')
+    throwIfError(readError, 'Failed to load order')
     previous = data as { status: RepairOrderStatus; ro_number: string }
   }
   const { error } = await client.from('repair_orders').update({ status }).eq('id', id)
-  throwIfError(error, 'Failed to update repair order status')
+  throwIfError(error, 'Failed to update order status')
   if (previous && previous.status !== status) {
     await notify({
       type: 'order_waiting',
@@ -302,6 +302,8 @@ export async function setRepairOrderWorkCompleted(
 export interface RepairOrderFieldUpdates {
   odometer_km?: number | null
   priority?: RepairOrderPriority
+  technician?: string | null
+  bay?: string | null
   shop_notes?: string | null
   customer_recommendations?: string | null
 }
@@ -312,7 +314,7 @@ export async function updateRepairOrderFields(
 ): Promise<void> {
   const client = requireClient()
   const { error } = await client.from('repair_orders').update(updates).eq('id', id)
-  throwIfError(error, 'Failed to update repair order')
+  throwIfError(error, 'Failed to update order')
 }
 
 // ---------- Order services ----------
@@ -445,14 +447,22 @@ export function estimatePrefill(detail: RepairOrderDetail): AmountPrefill {
   }
 }
 
+/** The most recently created estimate with status 'approved', or null. */
+export function latestApprovedEstimate(detail: RepairOrderDetail): Estimate | null {
+  return (
+    detail.estimates
+      .filter((e) => e.status === 'approved')
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ??
+    null
+  )
+}
+
 /**
  * Subtotal prefill for a new invoice: the latest approved estimate's
  * total if there is one, otherwise labour + parts from estimatePrefill.
  */
 export function invoiceSubtotalPrefill(detail: RepairOrderDetail): number {
-  const approved = detail.estimates
-    .filter((e) => e.status === 'approved')
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+  const approved = latestApprovedEstimate(detail)
   if (approved) return cents(Number(approved.total))
   const { labor, parts } = estimatePrefill(detail)
   return cents(labor + parts)
@@ -791,9 +801,9 @@ async function checkOrderBelongsToCustomer(
     .select('customer_id')
     .eq('id', repairOrderId)
     .single()
-  throwIfError(error, 'Failed to load repair order')
+  throwIfError(error, 'Failed to load order')
   if ((data as { customer_id: string }).customer_id !== customerId) {
-    throw new Error("That repair order doesn't belong to this customer.")
+    throw new Error("That order doesn't belong to this customer.")
   }
 }
 
@@ -1127,7 +1137,7 @@ export async function addTimelog(
   note?: string | null,
 ): Promise<Timelog> {
   const client = requireClient()
-  if (!repairOrderId) throw new Error('A repair order is required.')
+  if (!repairOrderId) throw new Error('An order is required.')
   const start = new Date(startedAt).getTime()
   const end = new Date(endedAt).getTime()
   if (Number.isNaN(start)) throw new Error('A valid start time is required.')
@@ -1206,7 +1216,7 @@ async function roNumberFor(repairOrderId: string): Promise<string> {
     .select('ro_number')
     .eq('id', repairOrderId)
     .maybeSingle()
-  return (data as { ro_number: string } | null)?.ro_number ?? 'repair order'
+  return (data as { ro_number: string } | null)?.ro_number ?? 'order'
 }
 
 /** All notifications: unread first, then newest first. */
@@ -1509,6 +1519,51 @@ export async function fetchCustomers(): Promise<CustomerWithVehicles[]> {
   return (data ?? []) as CustomerWithVehicles[]
 }
 
+export interface CustomerDetail {
+  customer: CustomerWithVehicles
+  /** Newest first. */
+  orders: RepairOrder[]
+  appointments: Appointment[]
+  /** Invoices on any of the customer's orders, newest first. */
+  invoices: Invoice[]
+}
+
+/** Everything shown on the customer detail view (read-only queries). */
+export async function fetchCustomerDetail(id: string): Promise<CustomerDetail> {
+  const client = requireClient()
+  const [customer, orders, appointments] = await Promise.all([
+    client.from('customers').select('*, vehicles(*)').eq('id', id).single(),
+    client
+      .from('repair_orders')
+      .select(RO_SELECT)
+      .eq('customer_id', id)
+      .order('created_at', { ascending: false }),
+    fetchAppointmentsByCustomer(id),
+  ])
+  throwIfError(customer.error, 'Failed to load customer')
+  throwIfError(orders.error, 'Failed to load orders')
+  const orderRows = (orders.data ?? []) as RepairOrder[]
+  let invoices: Invoice[] = []
+  if (orderRows.length > 0) {
+    const { data, error } = await client
+      .from('invoices')
+      .select('*')
+      .in(
+        'repair_order_id',
+        orderRows.map((o) => o.id),
+      )
+      .order('created_at', { ascending: false })
+    throwIfError(error, 'Failed to load invoices')
+    invoices = (data ?? []) as Invoice[]
+  }
+  return {
+    customer: customer.data as CustomerWithVehicles,
+    orders: orderRows,
+    appointments,
+    invoices,
+  }
+}
+
 export async function fetchCustomerList(): Promise<Customer[]> {
   const client = requireClient()
   const { data, error } = await client
@@ -1594,10 +1649,10 @@ const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const FOREIGN_KEY_VIOLATION = '23503'
 const MAX_INT = 2147483647
 
-export const CUSTOMER_HAS_ORDERS = 'This customer has repair orders and cannot be deleted.'
+export const CUSTOMER_HAS_ORDERS = 'This customer has orders and cannot be deleted.'
 export const CUSTOMER_VEHICLE_HAS_ORDERS =
-  "One of this customer's vehicles has repair orders, so the customer cannot be deleted."
-export const VEHICLE_HAS_ORDERS = 'This vehicle has repair orders and cannot be deleted.'
+  "One of this customer's vehicles has orders, so the customer cannot be deleted."
+export const VEHICLE_HAS_ORDERS = 'This vehicle has orders and cannot be deleted.'
 
 export type CustomerInput = NewCustomerInput
 export type VehicleInput = Omit<NewVehicleInput, 'customer_id'>
@@ -1661,7 +1716,7 @@ async function countRepairOrders(column: 'customer_id' | 'vehicle_id', ids: stri
     .from('repair_orders')
     .select('id', { count: 'exact', head: true })
     .in(column, ids)
-  throwIfError(error, 'Failed to check repair orders')
+  throwIfError(error, 'Failed to check orders')
   return count ?? 0
 }
 

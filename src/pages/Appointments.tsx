@@ -31,6 +31,7 @@ import {
   SecondaryButton,
   inputClassName,
 } from '../components/ui'
+import { OverflowMenu } from '../components/OverflowMenu'
 import type { AppointmentPrefill, View } from '../components/Layout'
 
 const STATUS_ACTION_LABELS: Record<AppointmentStatus, string> = {
@@ -309,7 +310,7 @@ export function Appointments({
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <button
-            onClick={() => onNavigate({ name: 'customers', focusCustomerId: a.customer_id })}
+            onClick={() => onNavigate({ name: 'customer', id: a.customer_id })}
             className="font-semibold text-blue-400 hover:text-blue-300"
           >
             {a.customers?.name ?? 'Customer'}
@@ -328,7 +329,7 @@ export function Appointments({
         </div>
         {a.notes && <p className="mt-1 whitespace-pre-wrap text-xs text-slate-400">{a.notes}</p>}
         {(APPOINTMENT_STATUS_TRANSITIONS[a.status].length > 0 || editable) && (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {APPOINTMENT_STATUS_TRANSITIONS[a.status].map((next) => (
               <SecondaryButton
                 key={next}
@@ -339,14 +340,16 @@ export function Appointments({
               </SecondaryButton>
             ))}
             {editable && (
-              <>
-                <SecondaryButton onClick={() => startEdit(a)} disabled={busyId === a.id}>
-                  Edit
-                </SecondaryButton>
-                <SecondaryButton onClick={() => handleDelete(a)} disabled={busyId === a.id}>
-                  Delete
-                </SecondaryButton>
-              </>
+              <div className="ml-auto">
+                <OverflowMenu
+                  label="Appointment actions"
+                  disabled={busyId === a.id}
+                  items={[
+                    { label: 'Edit', onSelect: () => startEdit(a) },
+                    { label: 'Delete', danger: true, onSelect: () => handleDelete(a) },
+                  ]}
+                />
+              </div>
             )}
           </div>
         )}

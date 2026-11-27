@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
+  createOrderService,
   createRepairOrder,
   fetchCustomerList,
   fetchInspectionCountsByRepairOrder,
@@ -30,6 +31,46 @@ import {
   inputClassName,
 } from '../components/ui'
 import type { View } from '../components/Layout'
+import {
+  DEFAULT_LABOR_RATE,
+  ORDER_PRESETS,
+  formatPresetHours,
+  type OrderPreset,
+} from '../lib/orderPresets'
+
+/** One editable service line in the new-order form (preset orders). */
+interface LineDraft {
+  key: number
+  name: string
+  description: string
+  laborHours: string
+  laborRate: string
+  partsTotal: string
+}
+
+let nextLineKey = 1
+
+function blankLine(): LineDraft {
+  return {
+    key: nextLineKey++,
+    name: '',
+    description: '',
+    laborHours: '1',
+    laborRate: String(DEFAULT_LABOR_RATE),
+    partsTotal: '0',
+  }
+}
+
+function linesFromPreset(preset: OrderPreset): LineDraft[] {
+  return preset.services.map((s) => ({
+    key: nextLineKey++,
+    name: s.name,
+    description: s.description,
+    laborHours: String(s.labor_hours),
+    laborRate: String(s.labor_rate),
+    partsTotal: String(s.parts_total),
+  }))
+}
 
 type Tab = 'assigned' | 'completed'
 type Sort = 'oldest' | 'newest'
@@ -46,6 +87,9 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  /** The preset the form was opened from; null = blank order. */
+  const [preset, setPreset] = useState<OrderPreset | null>(null)
+  const [lines, setLines] = useState<LineDraft[]>([])
 
   const [tab, setTab] = useState<Tab>('assigned')
   const [search, setSearch] = useState('')
@@ -58,7 +102,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
   const [technician, setTechnician] = useState('')
   const [bay, setBay] = useState('')
   const [laborHours, setLaborHours] = useState('1')
-  const [laborRate, setLaborRate] = useState('120')
+  const [laborRate, setLaborRate] = useState(String(DEFAULT_LABOR_RATE))
   const [partsTotal, setPartsTotal] = useState('0')
 
   async function loadOrders() {
@@ -140,11 +184,54 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
     }
   }
 
+  function resetForm() {
+    setPreset(null)
+    setLines([])
+    setPriority('medium')
+    setConcern('')
+    setTechnician('')
+    setBay('')
+    setLaborHours('1')
+    setLaborRate(String(DEFAULT_LABOR_RATE))
+    setPartsTotal('0')
+  }
+
+  /** Opens the new-order form, prefilled from a preset (or empty for a blank order). */
+  function openForm(from: OrderPreset | null) {
+    resetForm()
+    setError(null)
+    if (from) {
+      setPreset(from)
+      setLines(linesFromPreset(from))
+      setPriority(from.priority)
+      setConcern(from.concern)
+    }
+    setShowForm(true)
+  }
+
+  function updateLine(key: number, patch: Partial<LineDraft>) {
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     setError(null)
     setSaving(true)
+    const serviceLines = preset
+      ? lines
+          .filter((l) => l.name.trim())
+          .map((l) => ({
+            name: l.name.trim(),
+            description: l.description.trim() || null,
+            labor_hours: Number(l.laborHours) || 0,
+            labor_rate: Number(l.laborRate) || 0,
+            parts_total: Number(l.partsTotal) || 0,
+          }))
+      : []
     try {
+      // Preset orders carry their work as service lines; the order-level
+      // labour/parts fields hold the same totals so the no-services fallback
+      // (estimatePrefill) still roughly matches if every service is removed.
       const created = await createRepairOrder({
         customer_id: customerId,
         vehicle_id: vehicleId,
@@ -152,17 +239,37 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
         concern: concern.trim(),
         technician: technician.trim(),
         bay: bay.trim(),
-        labor_hours: Number(laborHours) || 0,
-        labor_rate: Number(laborRate) || 0,
-        parts_total: Number(partsTotal) || 0,
+        ...(preset
+          ? {
+              labor_hours: serviceLines.reduce((sum, l) => sum + l.labor_hours, 0),
+              labor_rate: serviceLines[0]?.labor_rate ?? DEFAULT_LABOR_RATE,
+              parts_total: serviceLines.reduce((sum, l) => sum + l.parts_total, 0),
+            }
+          : {
+              labor_hours: Number(laborHours) || 0,
+              labor_rate: Number(laborRate) || 0,
+              parts_total: Number(partsTotal) || 0,
+            }),
       })
+      // Sequential so service positions follow the preset's order.
+      let added = 0
+      try {
+        for (const line of serviceLines) {
+          await createOrderService({ repair_order_id: created.id, ...line })
+          added++
+        }
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        setShowForm(false)
+        resetForm()
+        await loadOrders()
+        setError(
+          `Order ${created.ro_number} was created, but only ${added} of ${serviceLines.length} services were added (${reason}). Open the order to add the rest.`,
+        )
+        return
+      }
       setShowForm(false)
-      setConcern('')
-      setTechnician('')
-      setBay('')
-      setLaborHours('1')
-      setLaborRate('120')
-      setPartsTotal('0')
+      resetForm()
       await loadOrders()
       onNavigate({ name: 'repair-order', id: created.id })
     } catch (err) {
@@ -172,28 +279,70 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
     }
   }
 
-  if (loading) return <LoadingState message="Loading repair orders…" />
+  if (loading) return <LoadingState message="Loading orders…" />
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-white">Orders</h1>
         <PrimaryButton
-          onClick={() => setShowForm((v) => !v)}
+          onClick={() => (showForm ? setShowForm(false) : openForm(null))}
           disabled={customers.length === 0}
         >
-          {showForm ? 'Cancel' : 'New Repair Order'}
+          {showForm ? 'Cancel' : 'New Order'}
         </PrimaryButton>
       </div>
 
       <ErrorBanner message={error} />
 
       {customers.length === 0 && (
-        <EmptyState message="No customers yet. Add a customer on the Customers page first, then create a repair order." />
+        <EmptyState message="No customers yet. Add a customer on the Customers page first, then create an order." />
+      )}
+
+      {customers.length > 0 && !showForm && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+            Start from a preset
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {ORDER_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => openForm(p)}
+                className="flex flex-col gap-1 rounded-xl border border-slate-800 bg-slate-900 p-3 text-left transition hover:border-blue-500"
+              >
+                <span className="text-sm font-bold text-white">{p.name}</span>
+                <span className="text-xs text-slate-400">{p.description}</span>
+                <span className="mt-auto pt-1 text-xs font-medium text-blue-400">
+                  ~{formatPresetHours(p.estimated_hours)}
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => openForm(null)}
+              className="flex flex-col gap-1 rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-3 text-left transition hover:border-blue-500"
+            >
+              <span className="text-sm font-bold text-white">Blank Order</span>
+              <span className="text-xs text-slate-400">
+                Start from an empty order and fill in the details yourself.
+              </span>
+            </button>
+          </div>
+        </section>
       )}
 
       {showForm && customers.length > 0 && (
         <Card>
+          {preset && (
+            <p className="mb-4 text-sm text-slate-300">
+              Preset: <span className="font-semibold text-white">{preset.name}</span>{' '}
+              <span className="text-slate-500">
+                — every line below can be changed or removed.
+              </span>
+            </p>
+          )}
           <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Customer">
               <select
@@ -269,39 +418,122 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                 placeholder="e.g. Alex M."
               />
             </Field>
-            <Field label="Labour hours">
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                value={laborHours}
-                onChange={(e) => setLaborHours(e.target.value)}
-                className={inputClassName}
-              />
-            </Field>
-            <Field label="Labour rate ($/hr)">
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={laborRate}
-                onChange={(e) => setLaborRate(e.target.value)}
-                className={inputClassName}
-              />
-            </Field>
-            <Field label="Parts total ($)">
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={partsTotal}
-                onChange={(e) => setPartsTotal(e.target.value)}
-                className={inputClassName}
-              />
-            </Field>
+            {!preset && (
+              <>
+                <Field label="Labour hours">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={laborHours}
+                    onChange={(e) => setLaborHours(e.target.value)}
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Labour rate ($/hr)">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={laborRate}
+                    onChange={(e) => setLaborRate(e.target.value)}
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label="Parts total ($)">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={partsTotal}
+                    onChange={(e) => setPartsTotal(e.target.value)}
+                    className={inputClassName}
+                  />
+                </Field>
+              </>
+            )}
+            {preset && (
+              <div className="flex flex-col gap-3 md:col-span-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+                  Services
+                </h3>
+                {lines.length === 0 && (
+                  <p className="text-sm text-slate-500">
+                    No services. Add one below, or create the order without services.
+                  </p>
+                )}
+                {lines.map((line) => (
+                  <div
+                    key={line.key}
+                    className="grid grid-cols-2 gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3 md:grid-cols-[2fr_1fr_1fr_1fr_auto]"
+                  >
+                    <div className="col-span-2 md:col-span-1">
+                      <Field label="Service">
+                        <input
+                          required
+                          value={line.name}
+                          onChange={(e) => updateLine(line.key, { name: e.target.value })}
+                          className={inputClassName}
+                          placeholder="e.g. Oil & filter change"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Hours">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        value={line.laborHours}
+                        onChange={(e) => updateLine(line.key, { laborHours: e.target.value })}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label="Rate ($/hr)">
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={line.laborRate}
+                        onChange={(e) => updateLine(line.key, { laborRate: e.target.value })}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label="Parts ($)">
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={line.partsTotal}
+                        onChange={(e) => updateLine(line.key, { partsTotal: e.target.value })}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={() => setLines((prev) => prev.filter((l) => l.key !== line.key))}
+                        className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:border-rose-500 hover:text-rose-400"
+                        aria-label={`Remove ${line.name || 'service'}`}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setLines((prev) => [...prev, blankLine()])}
+                    className="rounded-lg border border-dashed border-slate-600 px-3 py-2 text-sm font-medium text-slate-300 hover:border-blue-500 hover:text-blue-400"
+                  >
+                    + Add service
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="md:col-span-2">
               <PrimaryButton type="submit" disabled={saving}>
-                {saving ? 'Creating…' : 'Create Repair Order'}
+                {saving ? 'Creating…' : 'Create Order'}
               </PrimaryButton>
             </div>
           </form>
@@ -348,7 +580,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
         <EmptyState
           message={
             tab === 'assigned'
-              ? 'No assigned orders match. Create a repair order to get started.'
+              ? 'No assigned orders match. Create an order to get started.'
               : 'No completed orders yet. Orders move here when their work is marked complete.'
           }
         />
