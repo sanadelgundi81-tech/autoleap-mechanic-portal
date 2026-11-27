@@ -24,7 +24,7 @@ export type View =
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'dashboard', label: 'Dashboard' },
-  { name: 'repair-orders', label: 'Repair Orders' },
+  { name: 'repair-orders', label: 'Orders' },
   { name: 'appointments', label: 'Appointments' },
   { name: 'notifications', label: 'Notifications' },
   { name: 'timelogs', label: 'Timelogs' },

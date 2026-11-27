@@ -19,7 +19,7 @@ import {
 import type { View } from '../components/Layout'
 
 const RELATED_LABELS: Record<NotificationRelatedType, string> = {
-  repair_order: 'repair order',
+  repair_order: 'order',
   appointment: 'appointment',
   customer: 'customer',
   estimate: 'estimate',

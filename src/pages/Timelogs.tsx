@@ -168,7 +168,7 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
                   {t.repair_orders.ro_number}
                 </button>
               ) : (
-                <span className="font-semibold text-slate-300">Repair order</span>
+                <span className="font-semibold text-slate-300">Order</span>
               )}
               <span className="text-slate-300">{t.repair_orders?.customers?.name ?? ''}</span>
               {isRunning && (
@@ -254,7 +254,7 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
       <ErrorBanner message={error} />
 
       {orders.length === 0 && (
-        <EmptyState message="No repair orders yet. Create a repair order first, then log time against it." />
+        <EmptyState message="No orders yet. Create an order first, then log time against it." />
       )}
 
       {showForm && orders.length > 0 && (
@@ -265,7 +265,7 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
               Start on the order&apos;s page.
             </p>
             <div className="md:col-span-2">
-              <Field label="Repair order">
+              <Field label="Order">
                 <select
                   required
                   value={entry.repairOrderId}

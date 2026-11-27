@@ -252,8 +252,8 @@ export function RepairOrderDetailPage({
     }
   }
 
-  if (loading) return <LoadingState message="Loading repair order…" />
-  if (!detail) return <ErrorBanner message={error ?? 'Repair order not found.'} />
+  if (loading) return <LoadingState message="Loading order…" />
+  if (!detail) return <ErrorBanner message={error ?? 'Order not found.'} />
 
   const { repairOrder: ro, inspectionSummary, services } = detail
   const currentStep = REPAIR_ORDER_STATUSES.indexOf(ro.status)
