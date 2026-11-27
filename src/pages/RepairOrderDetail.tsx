@@ -11,6 +11,7 @@ import {
   fetchVehicleHistory,
   getOrCreateInspection,
   invoiceSubtotalPrefill,
+  latestApprovedEstimate,
   setRepairOrderWorkCompleted,
   startTimelog,
   stopTimelog,
@@ -909,6 +910,10 @@ function ServicesSection({
   // labour/parts fields when there are none) — no separate totals formula.
   const totals = estimatePrefill(detail)
   const subtotal = totals.labor + totals.parts
+  // Tax lives on estimates, not the order: use the latest approved estimate's.
+  const approved = latestApprovedEstimate(detail)
+  const tax = approved ? Number(approved.tax) : 0
+  const total = Math.round((subtotal + tax) * 100) / 100
 
   /** Runs a change, then reloads the order detail so the counts update. */
   async function run(id: string | null, action: () => Promise<void>): Promise<boolean> {
@@ -1090,13 +1095,18 @@ function ServicesSection({
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-slate-400">
-            Tax <span className="text-xs text-slate-500">(entered on the estimate / invoice)</span>
+            Tax{' '}
+            <span className="text-xs text-slate-500">
+              {approved
+                ? `(from approved estimate, ${formatDate(approved.created_at)})`
+                : '(entered on the estimate / invoice)'}
+            </span>
           </dt>
-          <dd className="text-slate-200">{money(0)}</dd>
+          <dd className="text-slate-200">{money(tax)}</dd>
         </div>
         <div className="flex justify-between gap-4 border-t border-slate-800 pt-1 text-base">
           <dt className="font-bold text-white">Total</dt>
-          <dd className="font-bold text-white">{money(subtotal)}</dd>
+          <dd className="font-bold text-white">{money(total)}</dd>
         </div>
       </dl>
     </div>

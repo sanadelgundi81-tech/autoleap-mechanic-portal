@@ -447,14 +447,22 @@ export function estimatePrefill(detail: RepairOrderDetail): AmountPrefill {
   }
 }
 
+/** The most recently created estimate with status 'approved', or null. */
+export function latestApprovedEstimate(detail: RepairOrderDetail): Estimate | null {
+  return (
+    detail.estimates
+      .filter((e) => e.status === 'approved')
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ??
+    null
+  )
+}
+
 /**
  * Subtotal prefill for a new invoice: the latest approved estimate's
  * total if there is one, otherwise labour + parts from estimatePrefill.
  */
 export function invoiceSubtotalPrefill(detail: RepairOrderDetail): number {
-  const approved = detail.estimates
-    .filter((e) => e.status === 'approved')
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+  const approved = latestApprovedEstimate(detail)
   if (approved) return cents(Number(approved.total))
   const { labor, parts } = estimatePrefill(detail)
   return cents(labor + parts)
