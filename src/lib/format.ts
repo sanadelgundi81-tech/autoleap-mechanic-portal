@@ -133,3 +133,15 @@ export function formatKm(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—'
   return `${Number(value).toLocaleString('en-US')} km`
 }
+
+/** An order's customer name; "Deleted customer" once the customer was deleted (order detached). */
+export function orderCustomerName(ro: { customers?: { name: string } | null } | null | undefined): string {
+  return ro?.customers?.name ?? 'Deleted customer'
+}
+
+/** An order's vehicle label; "Deleted vehicle" once the vehicle was deleted (order detached). */
+export function orderVehicleLabel(
+  ro: { vehicles?: Parameters<typeof vehicleLabel>[0] } | null | undefined,
+): string {
+  return ro?.vehicles ? vehicleLabel(ro.vehicles) : 'Deleted vehicle'
+}

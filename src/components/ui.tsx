@@ -160,19 +160,22 @@ export function PrimaryButton({
   type = 'button',
   disabled = false,
   className = '',
+  title,
 }: {
   children: ReactNode
   onClick?: () => void
   type?: 'button' | 'submit'
   disabled?: boolean
   className?: string
+  title?: string
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      title={title}
+      className={`inline-flex min-h-[44px] items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-onaccent transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
     >
       {children}
     </button>
@@ -185,19 +188,22 @@ export function SecondaryButton({
   type = 'button',
   disabled = false,
   className = '',
+  title,
 }: {
   children: ReactNode
   onClick?: () => void
   type?: 'button' | 'submit'
   disabled?: boolean
   className?: string
+  title?: string
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      title={title}
+      className={`inline-flex min-h-[44px] items-center justify-center rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
     >
       {children}
     </button>
@@ -213,14 +219,15 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs text-slate-400">{label}</span>
+      <span className="mb-1 block text-sm font-medium text-slate-300">{label}</span>
       {children}
     </label>
   )
 }
 
 export const inputClassName =
-  'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none'
+  // 16px text on phones stops iOS zooming into the field; 44px tall for thumbs.
+  'min-h-[44px] w-full min-w-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-base text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none sm:text-sm'
 
 export function ErrorBanner({ message }: { message: string | null }) {
   if (!message) return null

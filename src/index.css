@@ -1,11 +1,14 @@
+@import './theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Theme-aware base: light by default, dark when <html> has the "dark" class. */
 html,
 body {
-  background-color: #020617;
-  color: #f1f5f9;
+  background-color: rgb(var(--c-page-bg));
+  color: rgb(var(--c-page-fg));
 }
 
 /*

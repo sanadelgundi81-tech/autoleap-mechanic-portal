@@ -548,7 +548,7 @@ export async function updateEstimate(id: string, updates: EstimateUpdates): Prom
     updates.parts_total !== undefined ||
     updates.tax !== undefined
   if (changesAmounts && current.status !== 'draft') {
-    throw new Error('Only a draft estimate can have its amounts edited.')
+    throw new Error('Amounts can be edited on a draft estimate only.')
   }
   if (
     updates.status !== undefined &&
@@ -613,12 +613,9 @@ export async function deleteEstimate(id: string): Promise<void> {
     .from('estimates')
     .delete()
     .eq('id', id)
-    .eq('status', 'draft')
     .select('id')
   throwIfError(error, 'Failed to delete estimate')
-  if (!data || data.length === 0) {
-    throw new Error('Only a draft estimate can be deleted.')
-  }
+  if (!data || data.length === 0) throw new Error('That estimate was already deleted.')
 }
 
 export interface NewInvoiceInput {
@@ -667,7 +664,7 @@ export async function updateInvoice(id: string, updates: InvoiceUpdates): Promis
   }
   const changesAmounts = updates.subtotal !== undefined || updates.tax !== undefined
   if (changesAmounts && current.status !== 'draft') {
-    throw new Error('Only a draft invoice can have its amounts edited.')
+    throw new Error('Amounts can be edited on a draft invoice only.')
   }
   const nextStatus = updates.status ?? current.status
   if (
@@ -718,12 +715,9 @@ export async function deleteInvoice(id: string): Promise<void> {
     .from('invoices')
     .delete()
     .eq('id', id)
-    .eq('status', 'draft')
     .select('id')
   throwIfError(error, 'Failed to delete invoice')
-  if (!data || data.length === 0) {
-    throw new Error('Only a draft invoice can be deleted.')
-  }
+  if (!data || data.length === 0) throw new Error('That invoice was already deleted.')
 }
 
 // ---------- Appointments ----------
@@ -1701,13 +1695,7 @@ export async function createVehicle(input: NewVehicleInput): Promise<Vehicle> {
 
 /** Same email shape as the CSV import. */
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const FOREIGN_KEY_VIOLATION = '23503'
 const MAX_INT = 2147483647
-
-export const CUSTOMER_HAS_ORDERS = 'This customer has orders and cannot be deleted.'
-export const CUSTOMER_VEHICLE_HAS_ORDERS =
-  "One of this customer's vehicles has orders, so the customer cannot be deleted."
-export const VEHICLE_HAS_ORDERS = 'This vehicle has orders and cannot be deleted.'
 
 export type CustomerInput = NewCustomerInput
 export type VehicleInput = Omit<NewVehicleInput, 'customer_id'>
@@ -1764,17 +1752,6 @@ export function validateVehicle(input: VehicleInput, now: Date = new Date()): Ve
   }
 }
 
-async function countRepairOrders(column: 'customer_id' | 'vehicle_id', ids: string[]): Promise<number> {
-  if (ids.length === 0) return 0
-  const client = requireClient()
-  const { count, error } = await client
-    .from('repair_orders')
-    .select('id', { count: 'exact', head: true })
-    .in(column, ids)
-  throwIfError(error, 'Failed to check orders')
-  return count ?? 0
-}
-
 export async function updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
   const row = validateCustomer(input)
   const client = requireClient()
@@ -1789,18 +1766,14 @@ export async function updateCustomer(id: string, input: CustomerInput): Promise<
  * Refused, with nothing deleted, when the customer or any of their vehicles
  * has repair orders.
  */
+/**
+ * Deletes a customer. The database deletes their vehicles and appointments
+ * (cascade) and DETACHES their repair orders (customer_id / vehicle_id set
+ * null) — the orders and everything under them are kept.
+ */
 export async function deleteCustomer(id: string): Promise<void> {
-  if ((await countRepairOrders('customer_id', [id])) > 0) throw new Error(CUSTOMER_HAS_ORDERS)
-  const vehicleIds = (await fetchVehiclesForCustomer(id)).map((v) => v.id)
-  if ((await countRepairOrders('vehicle_id', vehicleIds)) > 0) {
-    throw new Error(CUSTOMER_VEHICLE_HAS_ORDERS)
-  }
   const client = requireClient()
   const { data, error } = await client.from('customers').delete().eq('id', id).select('id')
-  // An order added between the check and the delete: the database refuses; show the same reason.
-  if ((error as { code?: string } | null)?.code === FOREIGN_KEY_VIOLATION) {
-    throw new Error(CUSTOMER_HAS_ORDERS)
-  }
   throwIfError(error, 'Failed to delete customer')
   if (!data || data.length === 0) throw new Error('That customer was already deleted.')
 }
@@ -1818,13 +1791,10 @@ export async function updateVehicle(id: string, input: VehicleInput): Promise<Ve
  * Deletes a vehicle. Its appointments stay, with the vehicle cleared (set null).
  * Refused, with nothing deleted, when the vehicle has repair orders.
  */
+/** Deletes a vehicle. Its repair orders are DETACHED (vehicle_id set null) and kept. */
 export async function deleteVehicle(id: string): Promise<void> {
-  if ((await countRepairOrders('vehicle_id', [id])) > 0) throw new Error(VEHICLE_HAS_ORDERS)
   const client = requireClient()
   const { data, error } = await client.from('vehicles').delete().eq('id', id).select('id')
-  if ((error as { code?: string } | null)?.code === FOREIGN_KEY_VIOLATION) {
-    throw new Error(VEHICLE_HAS_ORDERS)
-  }
   throwIfError(error, 'Failed to delete vehicle')
   if (!data || data.length === 0) throw new Error('That vehicle was already deleted.')
 }
@@ -2104,4 +2074,177 @@ export async function deleteTorqueSpec(id: string): Promise<void> {
   const { data, error } = await client.from('torque_specs').delete().eq('id', id).select('id')
   throwIfError(error, 'Failed to delete torque spec')
   if (!data || data.length === 0) throw new Error('That torque spec was already deleted.')
+}
+
+// ---------- Deletes: the order itself, and what each delete will do ----------
+// Every delete is allowed. Before the warning dialog opens, the app reads the
+// real counts and amounts below (never guessed) so the dialog can list exactly
+// what is DELETED and what is DETACHED (kept, link removed).
+
+/**
+ * Deletes a repair order. The database deletes its services, estimates,
+ * invoices, timelogs and inspection (+ results) by cascade; appointments
+ * linked to it are kept with the order cleared (SET NULL).
+ */
+export async function deleteRepairOrder(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client.from('repair_orders').delete().eq('id', id).select('id')
+  throwIfError(error, 'Failed to delete order')
+  if (!data || data.length === 0) throw new Error('That order was already deleted.')
+}
+
+async function countWhere(table: string, column: string, value: string): Promise<number> {
+  const client = requireClient()
+  const { count, error } = await client
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .eq(column, value)
+  throwIfError(error, `Failed to count ${table.replace(/_/g, ' ')}`)
+  return count ?? 0
+}
+
+export interface CustomerDeleteImpact {
+  vehicles: number
+  appointments: number
+  /** Orders that will be detached (kept). */
+  orders: number
+}
+
+export async function customerDeleteImpact(id: string): Promise<CustomerDeleteImpact> {
+  const [vehicles, appointments, orders] = await Promise.all([
+    countWhere('vehicles', 'customer_id', id),
+    countWhere('appointments', 'customer_id', id),
+    countWhere('repair_orders', 'customer_id', id),
+  ])
+  return { vehicles, appointments, orders }
+}
+
+export interface VehicleDeleteImpact {
+  /** Orders that will be detached (kept). */
+  orders: number
+  /** Appointments kept with the vehicle cleared. */
+  appointments: number
+}
+
+export async function vehicleDeleteImpact(id: string): Promise<VehicleDeleteImpact> {
+  const [orders, appointments] = await Promise.all([
+    countWhere('repair_orders', 'vehicle_id', id),
+    countWhere('appointments', 'vehicle_id', id),
+  ])
+  return { orders, appointments }
+}
+
+export interface InvoiceSummary {
+  id: string
+  invoice_number: string
+  status: InvoiceStatus
+  total: number
+  paid_at: string | null
+}
+
+export interface OrderDeleteImpact {
+  roNumber: string
+  services: number
+  estimates: number
+  invoices: InvoiceSummary[]
+  timelogs: number
+  /** Null when the order has no inspection. */
+  inspection: { results: number } | null
+  /** Appointments kept with the order cleared. */
+  appointments: number
+}
+
+export async function orderDeleteImpact(id: string): Promise<OrderDeleteImpact> {
+  const client = requireClient()
+  const [order, services, estimates, invoices, timelogs, inspections, appointments] =
+    await Promise.all([
+      client.from('repair_orders').select('ro_number').eq('id', id).maybeSingle(),
+      countWhere('repair_order_services', 'repair_order_id', id),
+      countWhere('estimates', 'repair_order_id', id),
+      client
+        .from('invoices')
+        .select('id, invoice_number, status, total, paid_at')
+        .eq('repair_order_id', id)
+        .order('created_at', { ascending: true }),
+      countWhere('timelogs', 'repair_order_id', id),
+      client.from('inspections').select('id').eq('repair_order_id', id),
+      countWhere('appointments', 'repair_order_id', id),
+    ])
+  throwIfError(order.error, 'Failed to load order')
+  if (!order.data) throw new Error('That order was already deleted.')
+  throwIfError(invoices.error, 'Failed to load invoices')
+  throwIfError(inspections.error, 'Failed to load inspection')
+  const inspectionIds = ((inspections.data ?? []) as { id: string }[]).map((r) => r.id)
+  let inspection: OrderDeleteImpact['inspection'] = null
+  if (inspectionIds.length > 0) {
+    const { count, error } = await client
+      .from('inspection_results')
+      .select('id', { count: 'exact', head: true })
+      .in('inspection_id', inspectionIds)
+    throwIfError(error, 'Failed to count inspection results')
+    inspection = { results: count ?? 0 }
+  }
+  return {
+    roNumber: (order.data as { ro_number: string }).ro_number,
+    services,
+    estimates,
+    invoices: ((invoices.data ?? []) as InvoiceSummary[]).map((i) => ({ ...i, total: Number(i.total) })),
+    timelogs,
+    inspection,
+    appointments,
+  }
+}
+
+/** The invoice as stored right now (for its delete warning). */
+export async function invoiceDeleteImpact(id: string): Promise<InvoiceSummary> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('invoices')
+    .select('id, invoice_number, status, total, paid_at')
+    .eq('id', id)
+    .maybeSingle()
+  throwIfError(error, 'Failed to load invoice')
+  if (!data) throw new Error('That invoice was already deleted.')
+  const row = data as InvoiceSummary
+  return { ...row, total: Number(row.total) }
+}
+
+/** The estimate as stored right now (for its delete warning). */
+export async function estimateDeleteImpact(
+  id: string,
+): Promise<{ id: string; status: EstimateStatus; total: number }> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('estimates')
+    .select('id, status, total')
+    .eq('id', id)
+    .maybeSingle()
+  throwIfError(error, 'Failed to load estimate')
+  if (!data) throw new Error('That estimate was already deleted.')
+  const row = data as { id: string; status: EstimateStatus; total: number }
+  return { ...row, total: Number(row.total) }
+}
+
+// ---------- Invoices page ----------
+
+/** An invoice with its repair order (customer + vehicle) joined; the order may be detached. */
+export type InvoiceWithOrder = Invoice & { repair_orders: RepairOrder | null }
+
+/** Every invoice across all orders, newest first. */
+export async function fetchAllInvoices(): Promise<InvoiceWithOrder[]> {
+  const client = requireClient()
+  const page = 1000
+  const all: InvoiceWithOrder[] = []
+  for (let from = 0; ; from += page) {
+    const { data, error } = await client
+      .from('invoices')
+      .select(`*, repair_orders(${RO_SELECT})`)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + page - 1)
+    throwIfError(error, 'Failed to load invoices')
+    const rows = (data ?? []) as InvoiceWithOrder[]
+    all.push(...rows)
+    if (rows.length < page) return all
+  }
 }

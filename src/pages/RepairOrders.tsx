@@ -8,7 +8,7 @@ import {
   fetchServiceCountsByRepairOrder,
   fetchVehiclesForCustomer,
 } from '../lib/data'
-import { formatDate, vehicleLabel } from '../lib/format'
+import { formatDate, orderCustomerName, orderVehicleLabel, vehicleLabel } from '../lib/format'
 import type { Customer, RepairOrder, Vehicle } from '../lib/types'
 import {
   REPAIR_ORDER_PRIORITIES,
@@ -151,8 +151,8 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
       if (!q) return true
       const haystack = [
         ro.ro_number,
-        ro.customers?.name ?? '',
-        vehicleLabel(ro.vehicles),
+        orderCustomerName(ro),
+        orderVehicleLabel(ro),
         ro.vehicles?.license_plate ?? '',
       ]
         .join(' ')
@@ -338,7 +338,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
           {preset && (
             <p className="mb-4 text-sm text-slate-300">
               Preset: <span className="font-semibold text-white">{preset.name}</span>{' '}
-              <span className="text-slate-500">
+              <span className="text-slate-400">
                 — every line below can be changed or removed.
               </span>
             </p>
@@ -422,7 +422,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
               <>
                 <Field label="Labour hours">
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="0.5"
                     value={laborHours}
@@ -432,7 +432,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                 </Field>
                 <Field label="Labour rate ($/hr)">
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     value={laborRate}
@@ -442,7 +442,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                 </Field>
                 <Field label="Parts total ($)">
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     value={partsTotal}
@@ -458,16 +458,16 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                   Services
                 </h3>
                 {lines.length === 0 && (
-                  <p className="text-sm text-slate-500">
+                  <p className="text-sm text-slate-400">
                     No services. Add one below, or create the order without services.
                   </p>
                 )}
                 {lines.map((line) => (
                   <div
                     key={line.key}
-                    className="grid grid-cols-2 gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3 md:grid-cols-[2fr_1fr_1fr_1fr_auto]"
+                    className="grid grid-cols-1 gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3 sm:grid-cols-2 md:grid-cols-[2fr_1fr_1fr_1fr_auto]"
                   >
-                    <div className="col-span-2 md:col-span-1">
+                    <div className="sm:col-span-2 md:col-span-1">
                       <Field label="Service">
                         <input
                           required
@@ -480,7 +480,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                     </div>
                     <Field label="Hours">
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="0"
                         step="0.25"
                         value={line.laborHours}
@@ -490,7 +490,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                     </Field>
                     <Field label="Rate ($/hr)">
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="0"
                         step="1"
                         value={line.laborRate}
@@ -500,7 +500,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                     </Field>
                     <Field label="Parts ($)">
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="0"
                         step="1"
                         value={line.partsTotal}
@@ -545,7 +545,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
           <button
             onClick={() => setTab('assigned')}
             className={`rounded-md px-4 py-1.5 text-sm font-semibold ${
-              tab === 'assigned' ? 'bg-blue-600 text-white' : 'text-slate-300'
+              tab === 'assigned' ? 'bg-blue-600 text-onaccent' : 'text-slate-300'
             }`}
           >
             Assigned ({assignedCount})
@@ -553,7 +553,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
           <button
             onClick={() => setTab('completed')}
             className={`rounded-md px-4 py-1.5 text-sm font-semibold ${
-              tab === 'completed' ? 'bg-blue-600 text-white' : 'text-slate-300'
+              tab === 'completed' ? 'bg-blue-600 text-onaccent' : 'text-slate-300'
             }`}
           >
             Completed ({completedCount})
@@ -598,7 +598,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h3 className="font-bold text-white">{vehicleLabel(ro.vehicles)}</h3>
+                    <h3 className="font-bold text-white">{orderVehicleLabel(ro)}</h3>
                     <p className="text-xs text-slate-400">
                       LP: {ro.vehicles?.license_plate ?? '—'}
                     </p>
@@ -606,10 +606,12 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                   <PriorityBadge priority={ro.priority} />
                 </div>
                 <p className="mt-2 text-sm text-slate-200">
-                  {ro.ro_number} – {ro.customers?.name}{' '}
-                  <span className="text-emerald-400" title="Customer on file">
-                    ✓
-                  </span>
+                  {ro.ro_number} – {orderCustomerName(ro)}{' '}
+                  {ro.customers && (
+                    <span className="text-emerald-400" title="Customer on file">
+                      ✓
+                    </span>
+                  )}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <RepairOrderStatusBadge status={ro.status} />
@@ -625,7 +627,7 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                       {serviceCounts.total}
                     </span>
                   ) : (
-                    <span className="text-xs text-slate-500">No services yet</span>
+                    <span className="text-xs text-slate-400">No services yet</span>
                   )}
                   {counts ? (
                     <div className="flex items-center justify-between gap-2">
@@ -635,12 +637,12 @@ export function RepairOrders({ onNavigate }: { onNavigate: (view: View) => void 
                       <InspectionCountsRow counts={counts} />
                     </div>
                   ) : (
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-slate-400">
                       No inspection started yet
                     </span>
                   )}
                 </div>
-                <p className="mt-2 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-slate-400">
                   {formatDate(ro.created_at)}
                 </p>
               </button>

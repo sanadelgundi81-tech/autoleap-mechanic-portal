@@ -6,6 +6,7 @@ import {
   deleteEstimate,
   deleteInvoice,
   deleteOrderService,
+  deleteRepairOrder,
   estimatePrefill,
   fetchRepairOrderDetail,
   fetchVehicleHistory,
@@ -29,8 +30,9 @@ import {
   formatKm,
   formatTimelogRange,
   money,
+  orderCustomerName,
+  orderVehicleLabel,
   timelogMinutes,
-  vehicleLabel,
 } from '../lib/format'
 import {
   ESTIMATE_STATUS_LABELS,
@@ -66,6 +68,11 @@ import {
   inputClassName,
 } from '../components/ui'
 import type { View } from '../components/Layout'
+import { OverflowMenu } from '../components/OverflowMenu'
+import { VehicleRecalls, VinHistoryLinks } from '../components/VinTools'
+import { isValidVin } from '../lib/vin'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { estimateWarning, invoiceWarning, orderWarning, simpleWarning } from '../lib/deleteWarnings'
 import { rateLabel, rateLabelForCents } from '../lib/laborRates'
 
 /** Live stopwatch text: "4:05" or "1:02:09". */
@@ -88,9 +95,6 @@ function useNow(active: boolean): number {
   }, [active])
   return now
 }
-import { OverflowMenu } from '../components/OverflowMenu'
-import { VehicleRecalls, VinHistoryLinks } from '../components/VinTools'
-import { isValidVin } from '../lib/vin'
 
 // Only needed when Print is clicked, so it loads on demand (keeps the main chunk small).
 const InvoicePrintView = lazy(() =>
@@ -107,9 +111,9 @@ export function RepairOrderDetailPage({
   const [detail, setDetail] = useState<RepairOrderDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState<RepairOrderStatus>('estimate')
   const [savingStatus, setSavingStatus] = useState(false)
   const [savingWorkComplete, setSavingWorkComplete] = useState(false)
+  const deleteWarning = useDeleteWarning()
 
   const [odometer, setOdometer] = useState('')
   const [savingOdometer, setSavingOdometer] = useState(false)
@@ -133,7 +137,6 @@ export function RepairOrderDetailPage({
     try {
       const data = await fetchRepairOrderDetail(id)
       setDetail(data)
-      setStatus(data.repairOrder.status)
       setOdometer(
         data.repairOrder.odometer_km !== null
           ? String(data.repairOrder.odometer_km)
@@ -154,7 +157,6 @@ export function RepairOrderDetailPage({
         const data = await fetchRepairOrderDetail(id)
         if (cancelled) return
         setDetail(data)
-        setStatus(data.repairOrder.status)
         setOdometer(
           data.repairOrder.odometer_km !== null
             ? String(data.repairOrder.odometer_km)
@@ -174,12 +176,12 @@ export function RepairOrderDetailPage({
     }
   }, [id])
 
-  async function handleStatusChange() {
+  async function handleStatusChange(next: RepairOrderStatus) {
     if (!detail) return
     setError(null)
     setSavingStatus(true)
     try {
-      await updateRepairOrderStatus(detail.repairOrder.id, status)
+      await updateRepairOrderStatus(detail.repairOrder.id, next)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -269,12 +271,11 @@ export function RepairOrderDetailPage({
       setShowHistory(false)
       return
     }
+    const vehicleId = detail.repairOrder.vehicle_id
+    if (!vehicleId) return
     setLoadingHistory(true)
     try {
-      const rows = await fetchVehicleHistory(
-        detail.repairOrder.vehicle_id,
-        detail.repairOrder.id,
-      )
+      const rows = await fetchVehicleHistory(vehicleId, detail.repairOrder.id)
       setHistory(rows)
       setShowHistory(true)
     } catch (err) {
@@ -317,8 +318,29 @@ export function RepairOrderDetailPage({
     }
   }
 
+  function handleDeleteOrder() {
+    deleteWarning.ask({
+      title: `Delete order ${ro.ro_number}?`,
+      load: () => orderWarning(ro.id),
+      run: () => deleteRepairOrder(ro.id),
+      onDeleted: () => onNavigate({ name: 'repair-orders' }),
+    })
+  }
+
+  // Everything except the primary action (work complete / reopen) lives here.
+  const orderMenu = [
+    { label: 'Edit technician, bay & priority', onSelect: openDetailsEdit },
+    ...REPAIR_ORDER_STATUSES.filter((s) => s !== ro.status).map((s) => ({
+      label: `Move to ${REPAIR_ORDER_STATUS_LABELS[s]}`,
+      onSelect: () => void handleStatusChange(s),
+      disabled: savingStatus,
+    })),
+    { label: 'Delete order', danger: true, onSelect: handleDeleteOrder },
+  ]
+
   return (
-    <div className="flex flex-col gap-4 md:gap-6">
+    // pb-28: room for the sticky action bar so nothing hides under it.
+    <div className="flex flex-col gap-4 pb-28 md:gap-6">
       <div className="flex items-center justify-between">
         <SecondaryButton onClick={() => onNavigate({ name: 'repair-orders' })}>
           ← All Orders
@@ -326,6 +348,7 @@ export function RepairOrderDetailPage({
       </div>
 
       <ErrorBanner message={error} />
+      {deleteWarning.dialog}
 
       {/* (a) Header: RO number, status, priority, vehicle + customer, created date. */}
       <Card>
@@ -339,26 +362,26 @@ export function RepairOrderDetailPage({
               <PriorityBadge priority={ro.priority} />
             </div>
             <h1 className="mt-1 break-words text-2xl font-bold text-white">
-              {vehicleLabel(vehicle)}
+              {orderVehicleLabel(ro)}
             </h1>
             <p className="mt-0.5 text-sm text-slate-300">
-              <button
-                onClick={() => onNavigate({ name: 'customer', id: ro.customer_id })}
-                className="font-semibold text-blue-400 hover:text-blue-300"
-              >
-                {ro.customers?.name ?? 'Customer'}
-              </button>
-              <span className="text-slate-500"> · Created {formatDate(ro.created_at)}</span>
+              {ro.customer_id ? (
+                <button
+                  onClick={() => onNavigate({ name: 'customer', id: ro.customer_id! })}
+                  className="font-semibold text-blue-400 hover:text-blue-300"
+                >
+                  {orderCustomerName(ro)}
+                </button>
+              ) : (
+                <span className="font-semibold">{orderCustomerName(ro)}</span>
+              )}
+              <span className="text-slate-400"> · Created {formatDate(ro.created_at)}</span>
             </p>
             <p className="mt-1 text-xs text-slate-400">
               Technician: {ro.technician ?? 'Unassigned'}
               {' · '}Bay: {ro.bay ?? '—'}
             </p>
           </div>
-          <OverflowMenu
-            label="Order actions"
-            items={[{ label: 'Edit technician, bay & priority', onSelect: openDetailsEdit }]}
-          />
         </div>
 
         <p className="mt-3 rounded-lg bg-slate-800/60 p-3 text-sm text-slate-200">
@@ -415,7 +438,7 @@ export function RepairOrderDetailPage({
               key={s}
               className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
                 index === currentStep
-                  ? 'border-blue-500 bg-blue-600 text-white'
+                  ? 'border-blue-500 bg-blue-600 text-onaccent'
                   : index < currentStep
                     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
                     : 'border-slate-700 bg-slate-800 text-slate-400'
@@ -425,44 +448,13 @@ export function RepairOrderDetailPage({
             </span>
           ))}
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-sm text-slate-300">Move to:</span>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as RepairOrderStatus)}
-            className={`${inputClassName} w-auto`}
-          >
-            {REPAIR_ORDER_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {REPAIR_ORDER_STATUS_LABELS[s]}
-              </option>
-            ))}
-          </select>
-          <PrimaryButton
-            onClick={() => void handleStatusChange()}
-            disabled={savingStatus || status === ro.status}
-          >
-            {savingStatus ? 'Updating…' : 'Update status'}
-          </PrimaryButton>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-sm text-slate-300">
-            Work:{' '}
-            {ro.technician_completed_at
-              ? `Completed ${formatDate(ro.technician_completed_at)}`
-              : 'In progress'}
-          </span>
-          <PrimaryButton
-            onClick={() => void handleToggleWorkComplete()}
-            disabled={savingWorkComplete}
-          >
-            {savingWorkComplete
-              ? 'Updating…'
-              : ro.technician_completed_at
-                ? 'Reopen work'
-                : 'Mark work complete'}
-          </PrimaryButton>
-        </div>
+        <p className="mt-3 text-sm text-slate-300">
+          Work:{' '}
+          {ro.technician_completed_at
+            ? `Completed ${formatDate(ro.technician_completed_at)}`
+            : 'In progress'}
+          {savingStatus ? ' · Updating status…' : ''}
+        </p>
       </Card>
 
       {/* (b) Customer & vehicle summary. */}
@@ -470,14 +462,16 @@ export function RepairOrderDetailPage({
         <Card>
           <div className="flex items-start justify-between gap-2">
             <h2 className="text-sm font-bold text-white">Customer</h2>
-            <button
-              onClick={() => onNavigate({ name: 'customer', id: ro.customer_id })}
-              className="text-xs font-semibold text-blue-400 hover:text-blue-300"
-            >
-              View customer
-            </button>
+            {ro.customer_id && (
+              <button
+                onClick={() => onNavigate({ name: 'customer', id: ro.customer_id! })}
+                className="text-xs font-semibold text-blue-400 hover:text-blue-300"
+              >
+                View customer
+              </button>
+            )}
           </div>
-          <p className="mt-2 font-semibold text-slate-100">{ro.customers?.name}</p>
+          <p className="mt-2 font-semibold text-slate-100">{orderCustomerName(ro)}</p>
           <dl className="mt-2 space-y-1 text-sm">
             <div className="flex justify-between gap-4">
               <dt className="text-slate-400">Phone</dt>
@@ -493,7 +487,7 @@ export function RepairOrderDetailPage({
         </Card>
         <Card>
           <h2 className="text-sm font-bold text-white">Vehicle</h2>
-          <p className="mt-2 font-semibold text-slate-100">{vehicleLabel(vehicle)}</p>
+          <p className="mt-2 font-semibold text-slate-100">{orderVehicleLabel(ro)}</p>
           <dl className="mt-2 space-y-1 text-sm">
             <div className="flex justify-between gap-4">
               <dt className="text-slate-400">VIN</dt>
@@ -536,7 +530,7 @@ export function RepairOrderDetailPage({
             <div className="w-full sm:w-56">
               <Field label="Enter RO Odometer reading (km)">
                 <input
-                  type="number"
+                  type="number" inputMode="numeric"
                   min="0"
                   value={odometer}
                   onChange={(e) => setOdometer(e.target.value)}
@@ -553,6 +547,7 @@ export function RepairOrderDetailPage({
             )}
           </form>
 
+          {ro.vehicle_id && (
           <button
             onClick={() => void toggleHistory()}
             className="mt-3 text-sm font-semibold text-blue-400 hover:text-blue-300"
@@ -563,6 +558,7 @@ export function RepairOrderDetailPage({
                 ? 'Hide Vehicle History'
                 : 'View Vehicle History'}
           </button>
+          )}
           {showHistory && (
             <div className="mt-3 space-y-2 border-t border-slate-700 pt-3">
               {history.length === 0 ? (
@@ -675,7 +671,10 @@ export function RepairOrderDetailPage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-bold text-white">Appointments</h3>
           <PrimaryButton
+            disabled={!ro.customer_id}
+            title={ro.customer_id ? undefined : 'This order has no customer (deleted), so it cannot be booked.'}
             onClick={() =>
+              ro.customer_id &&
               onNavigate({
                 name: 'appointments',
                 prefill: {
@@ -726,7 +725,7 @@ export function RepairOrderDetailPage({
           {ro.shop_notes ? (
             <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">{ro.shop_notes}</p>
           ) : (
-            <p className="mt-2 text-sm text-slate-500">No notes</p>
+            <p className="mt-2 text-sm text-slate-400">No notes</p>
           )}
           <textarea
             value={shopNotes}
@@ -751,7 +750,7 @@ export function RepairOrderDetailPage({
               {ro.customer_recommendations}
             </p>
           ) : (
-            <p className="mt-2 text-sm text-slate-500">No notes</p>
+            <p className="mt-2 text-sm text-slate-400">No notes</p>
           )}
           <textarea
             value={recommendations}
@@ -774,6 +773,26 @@ export function RepairOrderDetailPage({
             {savingRecommendations ? 'Saving…' : 'Save recommendations'}
           </PrimaryButton>
         </Card>
+      </div>
+
+      {/* Sticky action bar: the primary action + the ⋯ menu, within thumb reach. */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-800 bg-slate-900/95 px-4 py-3 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-sm font-semibold text-slate-300">{ro.ro_number}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <PrimaryButton
+              onClick={() => void handleToggleWorkComplete()}
+              disabled={savingWorkComplete}
+            >
+              {savingWorkComplete
+                ? 'Updating…'
+                : ro.technician_completed_at
+                  ? 'Reopen work'
+                  : 'Mark work complete'}
+            </PrimaryButton>
+            <OverflowMenu label="Order actions" placement="up" buttonLabel="More" items={orderMenu} />
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -831,7 +850,7 @@ function TimelogsCard({
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className={`${inputClassName} w-48`}
+              className={`${inputClassName} sm:w-48`}
               placeholder="Note (optional)"
               aria-label="Timelog note"
             />
@@ -943,6 +962,7 @@ function ServicesSection({
   onChanged: () => Promise<void>
   onError: (message: string | null) => void
 }) {
+  const deleteWarning = useDeleteWarning()
   const [showAdd, setShowAdd] = useState(false)
   const [addValues, setAddValues] = useState<ServiceFormValues>(EMPTY_SERVICE_FORM)
   const [adding, setAdding] = useState(false)
@@ -1005,8 +1025,14 @@ function ServicesSection({
   }
 
   function handleDelete(service: OrderService) {
-    if (!window.confirm(`Delete service "${service.name}"?`)) return
-    void run(service.id, () => deleteOrderService(service.id))
+    deleteWarning.ask({
+      title: `Delete service "${service.name}"?`,
+      load: simpleWarning(
+        `The service "${service.name}" — ${money(serviceLabor(service) + Number(service.parts_total))} (labour + parts)`,
+      ),
+      run: () => deleteOrderService(service.id),
+      onDeleted: onChanged,
+    })
   }
 
   /** Starts the job timer on this line, or stops it (stopping bills the line). */
@@ -1023,6 +1049,7 @@ function ServicesSection({
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900">
+      {deleteWarning.dialog}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 p-4">
         <div>
           <h2 className="text-base font-bold text-white">
@@ -1115,7 +1142,7 @@ function ServicesSection({
                           }
                           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                             mine
-                              ? 'bg-rose-600 text-white hover:bg-rose-500'
+                              ? 'bg-rose-600 text-onaccent hover:bg-rose-500'
                               : 'border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
                           }`}
                         >
@@ -1127,7 +1154,7 @@ function ServicesSection({
                             {rateLabel(service.name)}
                           </span>
                         ) : (
-                          <span className="text-xs text-slate-500">{rateLabel(service.name)}</span>
+                          <span className="text-xs text-slate-400">{rateLabel(service.name)}</span>
                         )}
                       </div>
                     )
@@ -1169,7 +1196,7 @@ function ServicesSection({
 
       <dl className="space-y-1 border-t border-slate-800 bg-slate-950/40 p-4 text-sm">
         {services.length === 0 && (
-          <p className="pb-1 text-xs text-slate-500">
+          <p className="pb-1 text-xs text-slate-400">
             No services — totals come from the order&apos;s labour and parts fields.
           </p>
         )}
@@ -1188,7 +1215,7 @@ function ServicesSection({
         <div className="flex justify-between gap-4">
           <dt className="text-slate-400">
             Tax{' '}
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-slate-400">
               {approved
                 ? `(from approved estimate, ${formatDate(approved.created_at)})`
                 : '(entered on the estimate / invoice)'}
@@ -1216,8 +1243,8 @@ function ServiceFormFields({
     onChange({ ...values, [key]: value })
   }
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      <div className="col-span-2 sm:col-span-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="sm:col-span-3">
         <Field label="Service name">
           <input
             required
@@ -1228,7 +1255,7 @@ function ServiceFormFields({
           />
         </Field>
       </div>
-      <div className="col-span-2 sm:col-span-3">
+      <div className="sm:col-span-3">
         <Field label="Description">
           <textarea
             value={values.description}
@@ -1241,7 +1268,7 @@ function ServiceFormFields({
       </div>
       <Field label="Labour hours">
         <input
-          type="number"
+          type="number" inputMode="decimal"
           min="0"
           step="0.1"
           value={values.laborHours}
@@ -1251,7 +1278,7 @@ function ServiceFormFields({
       </Field>
       <Field label="Labour rate ($/hr)">
         <input
-          type="number"
+          type="number" inputMode="decimal"
           min="0"
           step="0.01"
           value={values.laborRate}
@@ -1261,7 +1288,7 @@ function ServiceFormFields({
       </Field>
       <Field label="Parts total ($)">
         <input
-          type="number"
+          type="number" inputMode="decimal"
           min="0"
           step="0.01"
           value={values.partsTotal}
@@ -1323,7 +1350,7 @@ function MoneyField({
   return (
     <Field label={label}>
       <input
-        type="number"
+        type="number" inputMode="decimal"
         min="0"
         step="0.01"
         value={value}
@@ -1380,6 +1407,7 @@ function EstimatesCard({
   onError: (message: string | null) => void
 }) {
   const { busyId, run } = useDocAction(onChanged, onError)
+  const deleteWarning = useDeleteWarning()
   const [showCreate, setShowCreate] = useState(false)
   const [createValues, setCreateValues] = useState<EstimateFormValues>({
     labor: '0',
@@ -1438,12 +1466,17 @@ function EstimatesCard({
   }
 
   function handleDelete(estimate: Estimate) {
-    if (!window.confirm('Delete this draft estimate?')) return
-    void run(estimate.id, () => deleteEstimate(estimate.id))
+    deleteWarning.ask({
+      title: 'Delete this estimate?',
+      load: () => estimateWarning(estimate.id),
+      run: () => deleteEstimate(estimate.id),
+      onDeleted: onChanged,
+    })
   }
 
   return (
     <Card>
+      {deleteWarning.dialog}
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-base font-bold text-white">Estimates</h3>
         <PrimaryButton onClick={openCreate}>
@@ -1501,39 +1534,35 @@ function EstimatesCard({
                 {est.notes && (
                   <p className="mt-1 whitespace-pre-wrap text-xs text-slate-400">{est.notes}</p>
                 )}
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {ESTIMATE_STATUS_TRANSITIONS[est.status].map((next) => (
-                    <SecondaryButton
-                      key={next}
-                      onClick={() => handleStatus(est, next)}
-                      disabled={busyId === est.id}
-                    >
-                      {ESTIMATE_ACTION_LABELS[next]}
-                    </SecondaryButton>
-                  ))}
-                  {est.status === 'draft' && (
-                    <div className="ml-auto">
-                      <OverflowMenu
-                        label="Estimate actions"
-                        disabled={busyId === est.id}
-                        items={[
-                          {
-                            label: 'Edit',
-                            onSelect: () => {
-                              setEditingId(est.id)
-                              setEditValues({
-                                labor: String(est.labor_total),
-                                parts: String(est.parts_total),
-                                tax: String(est.tax),
-                                notes: est.notes ?? '',
-                              })
+                <div className="mt-2 flex justify-end">
+                  <OverflowMenu
+                    label="Estimate actions"
+                    buttonLabel="Actions"
+                    disabled={busyId === est.id}
+                    items={[
+                      ...ESTIMATE_STATUS_TRANSITIONS[est.status].map((next) => ({
+                        label: ESTIMATE_ACTION_LABELS[next] ?? next,
+                        onSelect: () => handleStatus(est, next),
+                      })),
+                      ...(est.status === 'draft'
+                        ? [
+                            {
+                              label: 'Edit',
+                              onSelect: () => {
+                                setEditingId(est.id)
+                                setEditValues({
+                                  labor: String(est.labor_total),
+                                  parts: String(est.parts_total),
+                                  tax: String(est.tax),
+                                  notes: est.notes ?? '',
+                                })
+                              },
                             },
-                          },
-                          { label: 'Delete', danger: true, onSelect: () => handleDelete(est) },
-                        ]}
-                      />
-                    </div>
-                  )}
+                          ]
+                        : []),
+                      { label: 'Delete', danger: true, onSelect: () => handleDelete(est) },
+                    ]}
+                  />
                 </div>
               </div>
             ),
@@ -1609,6 +1638,7 @@ function InvoicesCard({
   onError: (message: string | null) => void
 }) {
   const { busyId, run } = useDocAction(onChanged, onError)
+  const deleteWarning = useDeleteWarning()
   const [showCreate, setShowCreate] = useState(false)
   const [createValues, setCreateValues] = useState<InvoiceFormValues>({
     subtotal: '0',
@@ -1665,12 +1695,17 @@ function InvoicesCard({
   }
 
   function handleDelete(invoice: Invoice) {
-    if (!window.confirm(`Delete draft invoice ${invoice.invoice_number}?`)) return
-    void run(invoice.id, () => deleteInvoice(invoice.id))
+    deleteWarning.ask({
+      title: `Delete invoice ${invoice.invoice_number}?`,
+      load: () => invoiceWarning(invoice.id),
+      run: () => deleteInvoice(invoice.id),
+      onDeleted: onChanged,
+    })
   }
 
   return (
     <Card>
+      {deleteWarning.dialog}
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-base font-bold text-white">Invoices</h3>
         <PrimaryButton onClick={openCreate}>
@@ -1731,38 +1766,33 @@ function InvoicesCard({
                     ? ` · Paid ${formatDate(inv.paid_at)}`
                     : ''}
                 </p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="mt-2 flex items-center justify-between gap-2">
                   <SecondaryButton onClick={() => setPrintingId(inv.id)}>Print</SecondaryButton>
-                  {INVOICE_STATUS_TRANSITIONS[inv.status].map((next) => (
-                    <SecondaryButton
-                      key={next}
-                      onClick={() => handleStatus(inv, next)}
-                      disabled={busyId === inv.id}
-                    >
-                      {INVOICE_ACTION_LABELS[next]}
-                    </SecondaryButton>
-                  ))}
-                  {inv.status === 'draft' && (
-                    <div className="ml-auto">
-                      <OverflowMenu
-                        label={`Actions for ${inv.invoice_number}`}
-                        disabled={busyId === inv.id}
-                        items={[
-                          {
-                            label: 'Edit',
-                            onSelect: () => {
-                              setEditingId(inv.id)
-                              setEditValues({
-                                subtotal: String(inv.subtotal),
-                                tax: String(inv.tax),
-                              })
+                  <OverflowMenu
+                    label={`Actions for ${inv.invoice_number}`}
+                    disabled={busyId === inv.id}
+                    items={[
+                      ...INVOICE_STATUS_TRANSITIONS[inv.status].map((next) => ({
+                        label: INVOICE_ACTION_LABELS[next] ?? next,
+                        onSelect: () => handleStatus(inv, next),
+                      })),
+                      ...(inv.status === 'draft'
+                        ? [
+                            {
+                              label: 'Edit',
+                              onSelect: () => {
+                                setEditingId(inv.id)
+                                setEditValues({
+                                  subtotal: String(inv.subtotal),
+                                  tax: String(inv.tax),
+                                })
+                              },
                             },
-                          },
-                          { label: 'Delete', danger: true, onSelect: () => handleDelete(inv) },
-                        ]}
-                      />
-                    </div>
-                  )}
+                          ]
+                        : []),
+                      { label: 'Delete', danger: true, onSelect: () => handleDelete(inv) },
+                    ]}
+                  />
                 </div>
               </div>
             ),

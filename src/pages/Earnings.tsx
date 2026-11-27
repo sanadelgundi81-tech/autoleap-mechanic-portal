@@ -107,7 +107,7 @@ export function Earnings({ onNavigate }: { onNavigate: (view: View) => void }) {
                   <p className="font-semibold text-white">
                     {row.invoice_number}
                     <span className="ml-2 font-normal text-slate-300">
-                      {row.customer_name ?? 'Customer'}
+                      {row.customer_name ?? 'Deleted customer'}
                     </span>
                   </p>
                   <p className="text-xs text-slate-400">

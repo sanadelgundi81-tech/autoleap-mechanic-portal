@@ -17,6 +17,8 @@ import {
   SecondaryButton,
   inputClassName,
 } from '../components/ui'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { simpleWarning } from '../lib/deleteWarnings'
 import { OverflowMenu } from '../components/OverflowMenu'
 
 export const TORQUE_NOTE =
@@ -146,6 +148,7 @@ function message(err: unknown): string {
 
 export function TorqueSpecs() {
   const [specs, setSpecs] = useState<TorqueSpec[]>([])
+  const deleteWarning = useDeleteWarning()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -244,24 +247,13 @@ export function TorqueSpecs() {
     }
   }
 
-  async function handleDelete(spec: TorqueSpec) {
-    if (
-      !window.confirm(
-        `Delete the ${spec.job} spec for ${spec.make} ${spec.model} (${years(spec)})? This cannot be undone.`,
-      )
-    ) {
-      return
-    }
-    setError(null)
-    setBusyId(spec.id)
-    try {
-      await deleteTorqueSpec(spec.id)
-      await load()
-    } catch (err) {
-      setError(message(err))
-    } finally {
-      setBusyId(null)
-    }
+  function handleDelete(spec: TorqueSpec) {
+    deleteWarning.ask({
+      title: 'Delete this torque spec?',
+      load: simpleWarning(`${spec.job} — ${spec.make} ${spec.model} (${years(spec)})`),
+      run: () => deleteTorqueSpec(spec.id),
+      onDeleted: load,
+    })
   }
 
   if (loading) return <LoadingState message="Loading torque specs…" />
@@ -288,6 +280,7 @@ export function TorqueSpecs() {
       </p>
 
       <ErrorBanner message={error} />
+      {deleteWarning.dialog}
 
       {showAdd && (
         <Card>
@@ -305,7 +298,7 @@ export function TorqueSpecs() {
       )}
 
       <Card>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-5">
           <Field label="Make">
             <select
               value={makeFilter}
@@ -351,7 +344,7 @@ export function TorqueSpecs() {
               ))}
             </select>
           </Field>
-          <div className="col-span-2 md:col-span-1">
+          <div className="sm:col-span-2 md:col-span-1">
             <Field label="Fastener contains">
               <input
                 value={fastenerQuery}
@@ -442,7 +435,7 @@ function SpecRow({
             {t.ftlb} ft-lb
           </span>
         </div>
-        <p className="mt-1 break-all text-xs text-slate-500">
+        <p className="mt-1 break-all text-xs text-slate-400">
           Source:{' '}
           {src.href ? (
             <a
@@ -486,6 +479,7 @@ function TorqueFormFields({
     <Field label={label}>
       <input
         type="number"
+        inputMode={key === 'yearFrom' || key === 'yearTo' ? 'numeric' : 'decimal'}
         min="0"
         step="any"
         value={values[key]}
@@ -496,7 +490,7 @@ function TorqueFormFields({
     </Field>
   )
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
       <Field label="Make">
         <input
           required
@@ -518,7 +512,7 @@ function TorqueFormFields({
       </Field>
       {num('yearFrom', 'Year from', '2012')}
       {num('yearTo', 'Year to (blank = present)')}
-      <div className="col-span-2 md:col-span-4">
+      <div className="sm:col-span-2 md:col-span-4">
         <Field label="Job / fastener">
           <input
             required
@@ -534,7 +528,7 @@ function TorqueFormFields({
       {num('nmMax', 'Nm (max, if a range)')}
       {num('ftlb', 'ft-lb')}
       {num('ftlbMax', 'ft-lb (max, if a range)')}
-      <div className="col-span-2 md:col-span-4">
+      <div className="sm:col-span-2 md:col-span-4">
         <Field label="Source">
           <input
             required

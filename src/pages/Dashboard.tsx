@@ -5,7 +5,7 @@ import {
   fetchOpenInspectionFindings,
   type OpenFinding,
 } from '../lib/data'
-import { formatDate, hours, money, vehicleLabel } from '../lib/format'
+import { formatDate, hours, money, orderCustomerName, orderVehicleLabel } from '../lib/format'
 import type { DashboardStats, RepairOrder } from '../lib/types'
 import {
   Card,
@@ -62,7 +62,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
           <div className="mt-1 text-xl font-bold text-white">
             {stats ? `${stats.activeRepairOrders} in shop` : '—'}
           </div>
-          <div className="mt-0.5 text-[11px] text-blue-400">Assigned — not yet invoiced</div>
+          <div className="mt-0.5 text-xs text-blue-400">Assigned — not yet invoiced</div>
         </Card>
         <Card>
           <div className="text-xs font-medium text-slate-400">
@@ -71,14 +71,14 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
           <div className="mt-1 text-xl font-bold text-emerald-400">
             {stats ? money(stats.collectedPaidInvoices) : '—'}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Total of paid invoices</div>
+          <div className="mt-0.5 text-xs text-slate-400">Total of paid invoices</div>
         </Card>
         <Card>
           <div className="text-xs font-medium text-slate-400">Billed Hours</div>
           <div className="mt-1 text-xl font-bold text-amber-400">
             {stats ? hours(stats.billedHours) : '—'}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Across all orders</div>
+          <div className="mt-0.5 text-xs text-slate-400">Across all orders</div>
         </Card>
         <Card>
           <div className="text-xs font-medium text-slate-400">
@@ -87,7 +87,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
           <div className="mt-1 text-xl font-bold text-rose-400">
             {stats ? `${stats.openFindings} items` : '—'}
           </div>
-          <div className="mt-0.5 text-[11px] text-rose-300">
+          <div className="mt-0.5 text-xs text-rose-300">
             {stats
               ? `${stats.failedFindings} failed · ${stats.attentionFindings} attention`
               : '—'}
@@ -116,9 +116,9 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
                       <span className="text-xs text-slate-400">{ro.ro_number}</span>
                     </div>
                     <h3 className="mt-2 font-bold text-white">
-                      {vehicleLabel(ro.vehicles)}
+                      {orderVehicleLabel(ro)}
                     </h3>
-                    <p className="text-xs text-slate-400">{ro.customers?.name}</p>
+                    <p className="text-xs text-slate-400">{orderCustomerName(ro)}</p>
                     <div className="mt-3 flex items-center justify-between text-xs text-slate-300">
                       <span>Tech: {ro.technician ?? 'Unassigned'}</span>
                       <RepairOrderStatusBadge status={ro.status} />
@@ -164,7 +164,28 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
               {activeRos.length === 0 ? (
                 <EmptyState message="Nothing here yet." />
               ) : (
-                <table className="w-full text-left text-sm">
+                <>
+                {/* Phones: stacked cards. Wider screens: the table. */}
+                <ul className="space-y-2 sm:hidden">
+                  {activeRos.slice(0, 5).map((ro) => (
+                    <li key={ro.id}>
+                      <button
+                        onClick={() => onNavigate({ name: 'repair-order', id: ro.id })}
+                        className="w-full rounded-lg border border-slate-800 bg-slate-800/40 p-3 text-left"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-blue-400">{ro.ro_number}</span>
+                          <RepairOrderStatusBadge status={ro.status} />
+                        </div>
+                        <p className="mt-1 text-sm text-slate-200">{orderVehicleLabel(ro)}</p>
+                        <p className="text-sm text-slate-400">
+                          {orderCustomerName(ro)} · {formatDate(ro.created_at)}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <table className="hidden w-full text-left text-sm sm:table">
                   <thead>
                     <tr className="text-xs text-slate-400">
                       <th className="pb-2 pr-4 font-medium">RO</th>
@@ -182,8 +203,8 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
                         className="cursor-pointer border-t border-slate-800 text-slate-200 hover:bg-slate-800/50"
                       >
                         <td className="py-2 pr-4 font-semibold text-blue-400">{ro.ro_number}</td>
-                        <td className="py-2 pr-4">{vehicleLabel(ro.vehicles)}</td>
-                        <td className="py-2 pr-4">{ro.customers?.name}</td>
+                        <td className="py-2 pr-4">{orderVehicleLabel(ro)}</td>
+                        <td className="py-2 pr-4">{orderCustomerName(ro)}</td>
                         <td className="py-2 pr-4">
                           <RepairOrderStatusBadge status={ro.status} />
                         </td>
@@ -192,6 +213,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) 
                     ))}
                   </tbody>
                 </table>
+                </>
               )}
             </div>
           </Card>

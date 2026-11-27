@@ -7,7 +7,7 @@ import {
   updateVehicle,
   type CustomerDetail,
 } from '../lib/data'
-import { formatAppointmentTime, formatDate, formatKm, money, vehicleLabel } from '../lib/format'
+import { formatAppointmentTime, formatDate, formatKm, money, orderVehicleLabel, vehicleLabel } from '../lib/format'
 import { INVOICE_STATUS_LABELS, type Vehicle } from '../lib/types'
 import {
   AppointmentStatusBadge,
@@ -27,8 +27,6 @@ import {
   EMPTY_CUSTOMER,
   EMPTY_VEHICLE,
   VehicleFormFields,
-  confirmDeleteCustomer,
-  confirmDeleteVehicle,
   customerToForm,
   message,
   vehicleFields,
@@ -37,6 +35,8 @@ import {
   type VehicleFormValues,
 } from '../components/customerForms'
 import type { View } from '../components/Layout'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { customerWarning, vehicleWarning } from '../lib/deleteWarnings'
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -64,6 +64,7 @@ export function CustomerDetailPage({
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null)
   const [vehicleEdit, setVehicleEdit] = useState<VehicleFormValues>(EMPTY_VEHICLE)
   const nextYear = new Date().getFullYear() + 1
+  const deleteWarning = useDeleteWarning()
 
   const load = useCallback(async () => {
     try {
@@ -131,17 +132,13 @@ export function CustomerDetailPage({
     if (ok) setEditingCustomer(false)
   }
 
-  async function handleDeleteCustomer() {
-    if (!confirmDeleteCustomer(customer)) return
-    setError(null)
-    setBusyId(customer.id)
-    try {
-      await deleteCustomer(customer.id)
-      onNavigate({ name: 'customers' })
-    } catch (err) {
-      setError(message(err))
-      setBusyId(null)
-    }
+  function handleDeleteCustomer() {
+    deleteWarning.ask({
+      title: `Delete customer "${customer.name}"?`,
+      load: () => customerWarning(customer.id),
+      run: () => deleteCustomer(customer.id),
+      onDeleted: () => onNavigate({ name: 'customers' }),
+    })
   }
 
   async function handleSaveVehicle(event: FormEvent, vehicle: Vehicle) {
@@ -151,17 +148,40 @@ export function CustomerDetailPage({
   }
 
   function handleDeleteVehicle(vehicle: Vehicle) {
-    if (!confirmDeleteVehicle(vehicle)) return
-    void run(vehicle.id, () => deleteVehicle(vehicle.id))
+    deleteWarning.ask({
+      title: `Delete vehicle "${vehicleLabel(vehicle)}"?`,
+      load: () => vehicleWarning(vehicle.id),
+      run: () => deleteVehicle(vehicle.id),
+      onDeleted: load,
+    })
   }
 
+  function startEditCustomer() {
+    setEditingVehicleId(null)
+    setCustomerEdit(customerToForm(customer))
+    setEditingCustomer(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Phone first: calling is the most-used action; without a phone, editing is.
+  const telHref = customer.phone ? `tel:${customer.phone.replace(/[^\d+]/g, '')}` : null
+  const customerMenu = [
+    ...(telHref ? [{ label: 'Edit customer', onSelect: startEditCustomer }] : []),
+    ...(customer.email
+      ? [{ label: `Email ${customer.email}`, onSelect: () => window.open(`mailto:${customer.email}`, '_self') }]
+      : []),
+    { label: 'Delete customer', danger: true, onSelect: handleDeleteCustomer },
+  ]
+
   return (
-    <div className="flex flex-col gap-6">
+    // pb-28: room for the sticky action bar so nothing hides under it.
+    <div className="flex flex-col gap-6 pb-28">
       <div>
         <SecondaryButton onClick={backToList}>← All Customers</SecondaryButton>
       </div>
 
       <ErrorBanner message={error} />
+      {deleteWarning.dialog}
 
       <Card>
         {editingCustomer ? (
@@ -191,25 +211,6 @@ export function CustomerDetailPage({
                 <Row label="Customer since">{formatDate(customer.created_at)}</Row>
               </dl>
             </div>
-            <OverflowMenu
-              label={`Actions for ${customer.name}`}
-              disabled={busyId === customer.id}
-              items={[
-                {
-                  label: 'Edit',
-                  onSelect: () => {
-                    setEditingVehicleId(null)
-                    setCustomerEdit(customerToForm(customer))
-                    setEditingCustomer(true)
-                  },
-                },
-                {
-                  label: busyId === customer.id ? 'Deleting…' : 'Delete',
-                  danger: true,
-                  onSelect: () => void handleDeleteCustomer(),
-                },
-              ]}
-            />
           </div>
         )}
       </Card>
@@ -300,7 +301,7 @@ export function CustomerDetailPage({
               >
                 <div className="min-w-0">
                   <p className="font-semibold text-blue-400">{o.ro_number}</p>
-                  <p className="text-xs text-slate-300">{vehicleLabel(o.vehicles)}</p>
+                  <p className="text-xs text-slate-300">{orderVehicleLabel(o)}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <RepairOrderStatusBadge status={o.status} />
@@ -369,6 +370,32 @@ export function CustomerDetailPage({
           </div>
         )}
       </Card>
+
+      {/* Sticky action bar: the primary action + the ⋯ menu, within thumb reach. */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-800 bg-slate-900/95 px-4 py-3 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-sm font-semibold text-slate-300">{customer.name}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            {telHref ? (
+              <a
+                href={telHref}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-onaccent transition hover:bg-blue-500"
+              >
+                Call
+              </a>
+            ) : (
+              <PrimaryButton onClick={startEditCustomer}>Edit customer</PrimaryButton>
+            )}
+            <OverflowMenu
+              label={`Actions for ${customer.name}`}
+              placement="up"
+              buttonLabel="More"
+              disabled={busyId === customer.id}
+              items={customerMenu}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -24,6 +24,8 @@ import {
   SecondaryButton,
   inputClassName,
 } from '../components/ui'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { simpleWarning } from '../lib/deleteWarnings'
 import { OverflowMenu } from '../components/OverflowMenu'
 
 interface FormValues {
@@ -95,6 +97,7 @@ function snippet(text: string, max = 160): string {
 
 export function RepairGuides() {
   const [guides, setGuides] = useState<RepairGuide[]>([])
+  const deleteWarning = useDeleteWarning()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -110,8 +113,6 @@ export function RepairGuides() {
   const [form, setForm] = useState<FormValues>(emptyForm('procedure'))
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -191,19 +192,16 @@ export function RepairGuides() {
     }
   }
 
-  async function handleDelete(id: string) {
-    setDeleting(true)
-    setError(null)
-    try {
-      await deleteRepairGuide(id)
-      setSelectedId(null)
-      setConfirmDelete(false)
-      await reload()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setDeleting(false)
-    }
+  function handleDelete(guide: RepairGuide) {
+    deleteWarning.ask({
+      title: `Delete "${guide.title}"?`,
+      load: simpleWarning(`The repair guide "${guide.title}" (only this guide)`),
+      run: () => deleteRepairGuide(guide.id),
+      onDeleted: async () => {
+        setSelectedId(null)
+        await reload()
+      },
+    })
   }
 
   const set = (key: keyof FormValues) => (value: string) => setForm((f) => ({ ...f, [key]: value }))
@@ -317,13 +315,13 @@ export function RepairGuides() {
         <button
           onClick={() => {
             setSelectedId(null)
-            setConfirmDelete(false)
           }}
           className="text-sm text-blue-400 hover:underline"
         >
           ← Back to {REPAIR_GUIDE_CATEGORY_TABS[selected.category]}
         </button>
         <ErrorBanner message={error} />
+      {deleteWarning.dialog}
         <Card className="space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -337,33 +335,15 @@ export function RepairGuides() {
               label={`Actions for ${selected.title}`}
               items={[
                 { label: 'Edit', onSelect: () => openEdit(selected) },
-                ...(confirmDelete
-                  ? []
-                  : [{ label: 'Delete', danger: true, onSelect: () => setConfirmDelete(true) }]),
+                { label: 'Delete', danger: true, onSelect: () => handleDelete(selected) },
               ]}
             />
           </div>
 
-          {confirmDelete && (
-            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
-              <span>Delete “{selected.title}”? Only this guide is deleted. This cannot be undone.</span>
-              <button
-                onClick={() => void handleDelete(selected.id)}
-                disabled={deleting}
-                className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
-              >
-                {deleting ? 'Deleting…' : 'Yes, delete'}
-              </button>
-              <SecondaryButton onClick={() => setConfirmDelete(false)} disabled={deleting}>
-                Cancel
-              </SecondaryButton>
-            </div>
-          )}
-
           <div className="whitespace-pre-wrap break-words rounded-lg bg-slate-950/60 p-4 font-mono text-sm leading-relaxed text-slate-200">
             {selected.content}
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-400">
             Last updated {new Date(selected.updated_at).toLocaleString()}
           </p>
         </Card>
@@ -442,7 +422,7 @@ export function RepairGuides() {
             }`}
           >
             {REPAIR_GUIDE_CATEGORY_TABS[c]}
-            <span className="ml-1.5 text-xs text-slate-500">{tabCounts[c]}</span>
+            <span className="ml-1.5 text-xs text-slate-400">{tabCounts[c]}</span>
           </button>
         ))}
       </div>

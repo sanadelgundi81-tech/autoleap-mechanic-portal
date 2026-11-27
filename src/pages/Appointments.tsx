@@ -31,6 +31,8 @@ import {
   SecondaryButton,
   inputClassName,
 } from '../components/ui'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { simpleWarning } from '../lib/deleteWarnings'
 import { OverflowMenu } from '../components/OverflowMenu'
 import type { AppointmentPrefill, View } from '../components/Layout'
 
@@ -92,6 +94,7 @@ export function Appointments({
   onNavigate: (view: View) => void
 }) {
   const [appointments, setAppointments] = useState<Appointment[]>([])
+  const deleteWarning = useDeleteWarning()
   const [customers, setCustomers] = useState<CustomerWithVehicles[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -254,8 +257,14 @@ export function Appointments({
   }
 
   function handleDelete(a: Appointment) {
-    if (!window.confirm('Delete this appointment?')) return
-    void run(a.id, () => deleteAppointment(a.id))
+    deleteWarning.ask({
+      title: 'Delete this appointment?',
+      load: simpleWarning(
+        `Appointment ${formatAppointmentTime(a.starts_at, a.ends_at)} — ${a.customers?.name ?? 'customer'}${a.service ? ` (${a.service})` : ''}`,
+      ),
+      run: () => deleteAppointment(a.id),
+      onDeleted: load,
+    })
   }
 
   if (loading) return <LoadingState message="Loading appointments…" />
@@ -293,6 +302,23 @@ export function Appointments({
       )
     }
     const editable = APPOINTMENT_EDITABLE_STATUSES.includes(a.status)
+    const transitions = APPOINTMENT_STATUS_TRANSITIONS[a.status]
+    const primary = transitions.find((t) => t !== 'cancelled' && t !== 'no_show') ?? null
+    const menuItems = [
+      ...transitions
+        .filter((t) => t !== primary)
+        .map((t) => ({
+          label: STATUS_ACTION_LABELS[t],
+          onSelect: () => handleStatus(a, t),
+          danger: t === 'cancelled' || t === 'no_show',
+        })),
+      ...(editable
+        ? [
+            { label: 'Edit', onSelect: () => startEdit(a) },
+            { label: 'Delete', danger: true, onSelect: () => handleDelete(a) },
+          ]
+        : []),
+    ]
     return (
       <div
         key={a.id}
@@ -328,28 +354,22 @@ export function Appointments({
           )}
         </div>
         {a.notes && <p className="mt-1 whitespace-pre-wrap text-xs text-slate-400">{a.notes}</p>}
-        {(APPOINTMENT_STATUS_TRANSITIONS[a.status].length > 0 || editable) && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {APPOINTMENT_STATUS_TRANSITIONS[a.status].map((next) => (
-              <SecondaryButton
-                key={next}
-                onClick={() => handleStatus(a, next)}
-                disabled={busyId === a.id}
-              >
-                {STATUS_ACTION_LABELS[next]}
+        {(transitions.length > 0 || editable) && (
+          <div className="mt-3 flex items-center justify-between gap-2">
+            {/* The next forward step stays visible; everything else is in the ⋯ menu. */}
+            {primary ? (
+              <SecondaryButton onClick={() => handleStatus(a, primary)} disabled={busyId === a.id}>
+                {STATUS_ACTION_LABELS[primary]}
               </SecondaryButton>
-            ))}
-            {editable && (
-              <div className="ml-auto">
-                <OverflowMenu
-                  label="Appointment actions"
-                  disabled={busyId === a.id}
-                  items={[
-                    { label: 'Edit', onSelect: () => startEdit(a) },
-                    { label: 'Delete', danger: true, onSelect: () => handleDelete(a) },
-                  ]}
-                />
-              </div>
+            ) : (
+              <span />
+            )}
+            {menuItems.length > 0 && (
+              <OverflowMenu
+                label="Appointment actions"
+                disabled={busyId === a.id}
+                items={menuItems}
+              />
             )}
           </div>
         )}
@@ -367,6 +387,7 @@ export function Appointments({
       </div>
 
       <ErrorBanner message={error} />
+      {deleteWarning.dialog}
 
       {customers.length === 0 && (
         <EmptyState message="No customers yet. Add a customer on the Customers page first, then book an appointment." />

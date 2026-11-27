@@ -24,8 +24,6 @@ import {
   EMPTY_CUSTOMER,
   EMPTY_VEHICLE,
   VehicleFormFields,
-  confirmDeleteCustomer,
-  confirmDeleteVehicle,
   customerToForm,
   message,
   vehicleFields,
@@ -34,6 +32,8 @@ import {
   type VehicleFormValues,
 } from '../components/customerForms'
 import type { View } from '../components/Layout'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { customerWarning, vehicleWarning } from '../lib/deleteWarnings'
 
 export function Customers({
   focusCustomerId,
@@ -62,6 +62,7 @@ export function Customers({
   const [cardError, setCardError] = useState<{ customerId: string; message: string } | null>(null)
 
   const nextYear = new Date().getFullYear() + 1
+  const deleteWarning = useDeleteWarning()
 
   async function load() {
     try {
@@ -165,8 +166,12 @@ export function Customers({
   }
 
   function handleDeleteCustomer(customer: CustomerWithVehicles) {
-    if (!confirmDeleteCustomer(customer)) return
-    void run(customer.id, customer.id, () => deleteCustomer(customer.id))
+    deleteWarning.ask({
+      title: `Delete customer "${customer.name}"?`,
+      load: () => customerWarning(customer.id),
+      run: () => deleteCustomer(customer.id),
+      onDeleted: load,
+    })
   }
 
   function startEditVehicle(vehicle: Vehicle) {
@@ -185,8 +190,12 @@ export function Customers({
   }
 
   function handleDeleteVehicle(vehicle: Vehicle) {
-    if (!confirmDeleteVehicle(vehicle)) return
-    void run(vehicle.customer_id, vehicle.id, () => deleteVehicle(vehicle.id))
+    deleteWarning.ask({
+      title: `Delete vehicle "${vehicleLabel(vehicle)}"?`,
+      load: () => vehicleWarning(vehicle.id),
+      run: () => deleteVehicle(vehicle.id),
+      onDeleted: load,
+    })
   }
 
   function openCustomer(customerId: string) {
@@ -205,6 +214,7 @@ export function Customers({
       </div>
 
       <ErrorBanner message={error} />
+      {deleteWarning.dialog}
 
       {showCustomerForm && (
         <Card>
@@ -267,7 +277,7 @@ export function Customers({
                       {customer.email ? ` · ${customer.email}` : ''}
                     </p>
                     {customer.notes && (
-                      <p className="mt-1 text-xs text-slate-500">{customer.notes}</p>
+                      <p className="mt-1 text-xs text-slate-400">{customer.notes}</p>
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -302,7 +312,7 @@ export function Customers({
 
               <div className="mt-3 space-y-2">
                 {customer.vehicles.length === 0 ? (
-                  <p className="text-sm text-slate-500">No vehicles on file.</p>
+                  <p className="text-sm text-slate-400">No vehicles on file.</p>
                 ) : (
                   customer.vehicles.map((v) =>
                     editingVehicleId === v.id ? (
