@@ -86,7 +86,7 @@ export function InspectionReportPrintView({
         <button
           type="button"
           onClick={() => window.print()}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-onaccent hover:bg-blue-500"
         >
           Print
         </button>
@@ -99,7 +99,7 @@ export function InspectionReportPrintView({
         </button>
       </div>
 
-      <article className="invoice-print-sheet mx-auto max-w-3xl break-words rounded-lg bg-white p-5 text-black shadow-xl sm:p-8">
+      <article className="invoice-print-sheet mx-auto max-w-3xl break-words rounded-lg bg-paper p-5 text-black shadow-xl sm:p-8">
         <header className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-300 pb-4">
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Vehicle Inspection Report</h1>
           <dl className="text-sm sm:text-right">

@@ -259,8 +259,10 @@ export interface Vehicle {
 export interface RepairOrder {
   id: string
   ro_number: string
-  customer_id: string
-  vehicle_id: string
+  /** Null once the customer is deleted (the order is detached and kept). */
+  customer_id: string | null
+  /** Null once the vehicle is deleted (the order is detached and kept). */
+  vehicle_id: string | null
   status: RepairOrderStatus
   priority: RepairOrderPriority
   concern: string | null

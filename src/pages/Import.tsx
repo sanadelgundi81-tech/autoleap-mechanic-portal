@@ -146,7 +146,7 @@ export function Import() {
             key={s.key}
             className={`rounded-full border px-3 py-1 ${
               s.key === step
-                ? 'border-blue-500 bg-blue-600 text-white'
+                ? 'border-blue-500 bg-blue-600 text-onaccent'
                 : 'border-slate-700 bg-slate-900 text-slate-400'
             }`}
           >
@@ -168,7 +168,7 @@ export function Import() {
             type="file"
             accept=".csv,text/csv"
             onChange={(e) => void handleFile(e)}
-            className="mt-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-500"
+            className="mt-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-onaccent hover:file:bg-blue-500"
           />
         </Card>
       )}

@@ -21,6 +21,8 @@ const Import = lazy(() => import('./pages/Import').then((m) => ({ default: m.Imp
 const RepairGuides = lazy(() =>
   import('./pages/RepairGuides').then((m) => ({ default: m.RepairGuides })),
 )
+// The Invoices page loads on demand too.
+const Invoices = lazy(() => import('./pages/Invoices').then((m) => ({ default: m.Invoices })))
 // Torque Specs loads on demand too.
 const TorqueSpecs = lazy(() =>
   import('./pages/TorqueSpecs').then((m) => ({ default: m.TorqueSpecs })),
@@ -142,6 +144,11 @@ function Shell() {
       {view.name === 'import' && (
         <Suspense fallback={<LoadingState message="Loading import…" />}>
           <Import />
+        </Suspense>
+      )}
+      {view.name === 'invoices' && (
+        <Suspense fallback={<LoadingState message="Loading invoices…" />}>
+          <Invoices onNavigate={setView} />
         </Suspense>
       )}
       {view.name === 'torque' && (

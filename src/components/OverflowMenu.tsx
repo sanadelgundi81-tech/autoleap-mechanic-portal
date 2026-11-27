@@ -17,11 +17,17 @@ export function OverflowMenu({
   items,
   label = 'More actions',
   disabled = false,
+  placement = 'down',
+  buttonLabel,
 }: {
   items: OverflowMenuItem[]
   /** Accessible name for the ⋯ button, e.g. "Actions for Jane Doe". */
   label?: string
   disabled?: boolean
+  /** 'up' opens above the button (for a bar at the bottom of the screen). */
+  placement?: 'down' | 'up'
+  /** Visible text next to the ⋯ (e.g. "More"); the button is icon-only without it. */
+  buttonLabel?: string
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -90,9 +96,12 @@ export function OverflowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-lg leading-none text-slate-200 transition hover:bg-slate-700 disabled:opacity-50"
+        className={`flex min-h-[44px] min-w-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 text-lg leading-none text-slate-200 transition hover:bg-slate-700 disabled:opacity-50 ${
+          buttonLabel ? 'px-3' : ''
+        }`}
       >
         <span aria-hidden="true">⋯</span>
+        {buttonLabel && <span className="text-sm font-semibold">{buttonLabel}</span>}
       </button>
       {open && (
         <div
@@ -102,7 +111,9 @@ export function OverflowMenu({
           aria-label={label}
           onKeyDown={onMenuKeyDown}
           onClick={(e) => e.stopPropagation()}
-          className="absolute right-0 z-30 mt-1 min-w-[9rem] overflow-hidden rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl"
+          className={`absolute right-0 z-50 min-w-[11rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl ${
+            placement === 'up' ? 'bottom-full mb-1' : 'mt-1'
+          }`}
         >
           {items.map((item) => (
             <button
@@ -115,7 +126,7 @@ export function OverflowMenu({
                 buttonRef.current?.focus()
                 item.onSelect()
               }}
-              className={`block w-full px-4 py-2 text-left text-sm font-medium outline-none transition hover:bg-slate-800 focus:bg-slate-800 disabled:opacity-50 ${
+              className={`block min-h-[44px] w-full px-4 py-2.5 text-left text-sm font-medium outline-none transition hover:bg-slate-800 focus:bg-slate-800 disabled:opacity-50 ${
                 item.danger ? 'text-rose-400' : 'text-slate-200'
               }`}
             >

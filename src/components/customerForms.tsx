@@ -2,8 +2,7 @@
 // customer detail view, so both edit with the same fields and delete with
 // the same confirmation text.
 
-import { vehicleLabel } from '../lib/format'
-import type { Customer, CustomerWithVehicles, Vehicle } from '../lib/types'
+import type { Customer, Vehicle } from '../lib/types'
 import { Field, inputClassName } from './ui'
 import { VinField } from './VinTools'
 import type { DecodedVehicle } from '../lib/vin'
@@ -103,6 +102,9 @@ export function CustomerFormFields({
       </Field>
       <Field label="Phone">
         <input
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
           value={values.phone}
           onChange={(e) => set('phone', e.target.value)}
           className={inputClassName}
@@ -159,7 +161,7 @@ export function VehicleFormFields({
       />
       <Field label="Year">
         <input
-          type="number"
+          type="number" inputMode="numeric"
           min="1900"
           max={String(maxYear)}
           value={values.year}
@@ -219,7 +221,7 @@ export function VehicleFormFields({
       </Field>
       <Field label="Mileage (KM)">
         <input
-          type="number"
+          type="number" inputMode="numeric"
           min="0"
           value={values.mileageKm}
           onChange={(e) => set('mileageKm', e.target.value)}
@@ -227,22 +229,5 @@ export function VehicleFormFields({
         />
       </Field>
     </>
-  )
-}
-
-/** Confirm text for deleting a customer (vehicles + appointments go with it). */
-export function confirmDeleteCustomer(customer: CustomerWithVehicles): boolean {
-  const n = customer.vehicles.length
-  const goesWith =
-    n === 0
-      ? 'Their appointments are deleted too.'
-      : `Their ${n === 1 ? 'vehicle' : `${n} vehicles`} and appointments are deleted too.`
-  return window.confirm(`Delete customer "${customer.name}"? ${goesWith} This cannot be undone.`)
-}
-
-/** Confirm text for deleting a vehicle (its appointments stay, vehicle cleared). */
-export function confirmDeleteVehicle(vehicle: Vehicle): boolean {
-  return window.confirm(
-    `Delete vehicle "${vehicleLabel(vehicle)}"? Its appointments stay, with the vehicle cleared. This cannot be undone.`,
   )
 }

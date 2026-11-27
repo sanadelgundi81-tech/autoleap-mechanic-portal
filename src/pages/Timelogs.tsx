@@ -7,12 +7,7 @@ import {
   stopTimelog,
   updateTimelog,
 } from '../lib/data'
-import {
-  formatDuration,
-  formatTimelogRange,
-  fromDateTimeLocalValue,
-  timelogMinutes,
-} from '../lib/format'
+import { formatDuration, formatTimelogRange, fromDateTimeLocalValue, orderCustomerName, timelogMinutes } from '../lib/format'
 import type { RepairOrder, Timelog } from '../lib/types'
 import {
   Card,
@@ -24,6 +19,8 @@ import {
   SecondaryButton,
   inputClassName,
 } from '../components/ui'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { simpleWarning } from '../lib/deleteWarnings'
 import { OverflowMenu } from '../components/OverflowMenu'
 import type { View } from '../components/Layout'
 
@@ -51,6 +48,7 @@ function entryTimeError(values: ManualEntryValues): string | null {
 
 export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
   const [timelogs, setTimelogs] = useState<Timelog[]>([])
+  const deleteWarning = useDeleteWarning()
   const [orders, setOrders] = useState<RepairOrder[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -139,8 +137,14 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
   }
 
   function handleDelete(t: Timelog) {
-    if (!window.confirm('Delete this timelog entry?')) return
-    void run(t.id, () => deleteTimelog(t.id))
+    deleteWarning.ask({
+      title: 'Delete this timelog entry?',
+      load: simpleWarning(
+        `Timelog ${formatTimelogRange(t.started_at, t.ended_at)}${t.repair_orders ? ` on ${t.repair_orders.ro_number}` : ''} (labour already added to a service stays on that service)`,
+      ),
+      run: () => deleteTimelog(t.id),
+      onDeleted: load,
+    })
   }
 
   if (loading) return <LoadingState message="Loading timelogs…" />
@@ -171,7 +175,7 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
               ) : (
                 <span className="font-semibold text-slate-300">Order</span>
               )}
-              <span className="text-slate-300">{t.repair_orders?.customers?.name ?? ''}</span>
+              <span className="text-slate-300">{t.repair_orders ? orderCustomerName(t.repair_orders) : ''}</span>
               {isRunning && (
                 <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
                   Running
@@ -253,6 +257,7 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
       </div>
 
       <ErrorBanner message={error} />
+      {deleteWarning.dialog}
 
       {orders.length === 0 && (
         <EmptyState message="No orders yet. Create an order first, then log time against it." />
@@ -277,7 +282,7 @@ export function Timelogs({ onNavigate }: { onNavigate: (view: View) => void }) {
                   {orders.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.ro_number}
-                      {o.customers?.name ? ` — ${o.customers.name}` : ''}
+                      {` — ${orderCustomerName(o)}`}
                     </option>
                   ))}
                 </select>

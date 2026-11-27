@@ -21,6 +21,7 @@ import {
   SecondaryButton,
 } from '../components/ui'
 import type { View } from '../components/Layout'
+import { OverflowMenu } from '../components/OverflowMenu'
 
 // Only needed when Print report is clicked, so it loads on demand.
 const InspectionReportPrintView = lazy(() =>
@@ -40,14 +41,14 @@ const STATE_BUTTONS: {
     state: 'good',
     label: 'Good',
     symbol: '✓',
-    activeClass: 'border-teal-500 bg-teal-600 text-white',
+    activeClass: 'border-teal-500 bg-teal-600 text-onaccent',
     inactiveClass: 'border-teal-500/40 bg-teal-500/10 text-teal-300 hover:bg-teal-500/20',
   },
   {
     state: 'attention',
     label: 'Attention',
     symbol: '!',
-    activeClass: 'border-amber-500 bg-amber-600 text-white',
+    activeClass: 'border-amber-500 bg-amber-600 text-onaccent',
     inactiveClass:
       'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20',
   },
@@ -55,7 +56,7 @@ const STATE_BUTTONS: {
     state: 'failed',
     label: 'Failed',
     symbol: '✕',
-    activeClass: 'border-rose-500 bg-rose-600 text-white',
+    activeClass: 'border-rose-500 bg-rose-600 text-onaccent',
     inactiveClass: 'border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20',
   },
 ]
@@ -226,7 +227,7 @@ export function InspectionPage({
   })
 
   return (
-    <div className="flex flex-col gap-6 pb-24">
+    <div className="flex flex-col gap-6 pb-28">
       <div className="flex items-center justify-between">
         <SecondaryButton
           onClick={() => onNavigate({ name: 'repair-order', id: repairOrderId })}
@@ -330,7 +331,7 @@ export function InspectionPage({
                           title={btn.label}
                           aria-label={`${btn.label} — ${item.name}`}
                           aria-pressed={state === btn.state}
-                          className={`flex h-9 w-9 items-center justify-center rounded-lg border text-base font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                          className={`flex h-11 w-11 items-center justify-center rounded-lg border text-lg font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                             state === btn.state ? btn.activeClass : btn.inactiveClass
                           }`}
                         >
@@ -346,7 +347,7 @@ export function InspectionPage({
                     }
                     onBlur={() => void handleNoteBlur(item)}
                     disabled={isComplete}
-                    className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                    className="mt-2 min-h-[44px] w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-base text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none disabled:opacity-50 sm:text-sm"
                     placeholder={
                       item.is_free_text
                         ? 'Describe what you found…'
@@ -370,23 +371,36 @@ export function InspectionPage({
         </Suspense>
       )}
 
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800 bg-slate-900 px-4 py-3">
+      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-800 bg-slate-900/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
-          <SecondaryButton onClick={() => setShowPreview((v) => !v)}>
-            {showPreview ? 'Hide preview' : '👁 Preview'}
-          </SecondaryButton>
-          <span className="hidden text-xs text-slate-400 sm:inline">
+          <span className="text-sm font-semibold text-slate-300">
             {counts.total - counts.unmarked}/{counts.total} marked
           </span>
-          {isComplete ? (
-            <PrimaryButton onClick={() => void handleReopen()} disabled={saving}>
-              {saving ? 'Reopening…' : 'Reopen inspection'}
-            </PrimaryButton>
-          ) : (
-            <PrimaryButton onClick={() => void handleComplete()} disabled={saving}>
-              {saving ? 'Saving…' : 'Mark as complete'}
-            </PrimaryButton>
-          )}
+          <div className="flex items-center gap-2">
+            {isComplete ? (
+              <PrimaryButton onClick={() => void handleReopen()} disabled={saving}>
+                {saving ? 'Reopening…' : 'Reopen inspection'}
+              </PrimaryButton>
+            ) : (
+              <PrimaryButton onClick={() => void handleComplete()} disabled={saving}>
+                {saving ? 'Saving…' : 'Mark as complete'}
+              </PrimaryButton>
+            )}
+            <OverflowMenu
+              label="Inspection actions"
+              placement="up"
+              buttonLabel="More"
+              items={[
+                {
+                  label: showPreview ? 'Hide preview' : 'Preview findings',
+                  onSelect: () => setShowPreview((v) => !v),
+                },
+                ...(isComplete
+                  ? [{ label: 'Print report', onSelect: () => void handleOpenReport() }]
+                  : []),
+              ]}
+            />
+          </div>
         </div>
       </div>
     </div>

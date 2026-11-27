@@ -26,7 +26,7 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
       <div className="w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900 p-6">
         <div className="mb-6 flex items-center space-x-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-lg font-bold text-white">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-lg font-bold text-onaccent">
             AL
           </div>
           <div>

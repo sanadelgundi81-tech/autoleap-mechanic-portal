@@ -22,10 +22,13 @@ export function InvoicePrintView({
   repairOrder,
   invoice,
   onClose,
+  onOpenOrder,
 }: {
   repairOrder: RepairOrder
   invoice: Invoice
   onClose: () => void
+  /** Shown as "Open order RO-…" in the toolbar (the Invoices page links back to the order). */
+  onOpenOrder?: () => void
 }) {
   const doc = buildInvoiceDocument(repairOrder, invoice)
   const email = invoiceEmailLink(doc)
@@ -62,6 +65,9 @@ export function InvoicePrintView({
           </ToolbarButton>
           <SendButton link={email} label="Open in email app" />
           <SendButton link={whatsApp} label="Open in WhatsApp" newTab />
+          {onOpenOrder && (
+            <ToolbarButton onClick={onOpenOrder}>Open order {repairOrder.ro_number}</ToolbarButton>
+          )}
           <ToolbarButton onClick={onClose}>Close</ToolbarButton>
         </div>
         {email.reason && <p className="text-xs text-amber-300">Email: {email.reason}</p>}
@@ -78,7 +84,7 @@ export function InvoicePrintView({
         )}
       </div>
 
-      <article className="invoice-print-sheet mx-auto max-w-3xl rounded-lg bg-white p-8 text-black shadow-xl">
+      <article className="invoice-print-sheet mx-auto max-w-3xl rounded-lg bg-paper p-8 text-black shadow-xl">
         <header className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-300 pb-4">
           <h1 className="text-3xl font-bold tracking-tight">Invoice</h1>
           <dl className="text-right text-sm">
@@ -172,7 +178,7 @@ function Total({ label, children }: { label: string; children: ReactNode }) {
 
 const BUTTON =
   'rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50'
-const PRIMARY = `${BUTTON} bg-blue-600 text-white hover:bg-blue-500`
+const PRIMARY = `${BUTTON} bg-blue-600 text-onaccent hover:bg-blue-500`
 const SECONDARY = `${BUTTON} border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700`
 
 function ToolbarButton({

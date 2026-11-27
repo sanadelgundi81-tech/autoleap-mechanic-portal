@@ -15,6 +15,8 @@ import {
   LoadingState,
   PrimaryButton,
 } from '../components/ui'
+import { useDeleteWarning } from '../components/DeleteWarning'
+import { simpleWarning } from '../lib/deleteWarnings'
 import { OverflowMenu } from '../components/OverflowMenu'
 import type { View } from '../components/Layout'
 
@@ -41,6 +43,7 @@ export function Notifications({
   onUnreadChange: () => Promise<void>
 }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const deleteWarning = useDeleteWarning()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -119,8 +122,15 @@ export function Notifications({
   }
 
   function handleDelete(n: AppNotification) {
-    if (!window.confirm(`Delete the notification "${n.title}"?`)) return
-    void run(n.id, () => deleteNotification(n.id))
+    deleteWarning.ask({
+      title: 'Delete this notification?',
+      load: simpleWarning(`The notification "${n.title}"`),
+      run: () => deleteNotification(n.id),
+      onDeleted: async () => {
+        await load()
+        onUnreadChange()
+      },
+    })
   }
 
   if (loading) return <LoadingState message="Loading notifications…" />
@@ -151,7 +161,7 @@ export function Notifications({
             {n.title}
           </p>
           {n.body && <p className="mt-0.5 text-sm text-slate-400">{n.body}</p>}
-          <p className="mt-1 text-xs text-slate-500">{formatDateTime(n.created_at)}</p>
+          <p className="mt-1 text-xs text-slate-400">{formatDateTime(n.created_at)}</p>
         </button>
         <OverflowMenu
           label="Notification actions"
@@ -185,6 +195,7 @@ export function Notifications({
       </div>
 
       <ErrorBanner message={error} />
+      {deleteWarning.dialog}
 
       {notifications.length === 0 ? (
         <EmptyState message="No notifications yet. Bookings, cancellations, estimate and invoice changes, and orders waiting on approval or parts show up here." />

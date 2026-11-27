@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Theme before first paint: dark unless the user chose light (no flash).
+      try {
+        if (localStorage.getItem('autoleap-theme') !== 'light') document.documentElement.classList.add('dark')
+      } catch (e) {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
     <title>AutoLeap – Independent Mechanic Portal &amp; DVI Command Center</title>
   </head>
   <body>
