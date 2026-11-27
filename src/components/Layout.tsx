@@ -22,6 +22,7 @@ export type View =
   | { name: 'customer'; id: string }
   | { name: 'import' }
   | { name: 'guides' }
+  | { name: 'torque' }
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'dashboard', label: 'Dashboard' },
@@ -33,6 +34,7 @@ const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'customers', label: 'Customers' },
   { name: 'import', label: 'Import' },
   { name: 'guides', label: 'Repair Guides' },
+  { name: 'torque', label: 'Torque Specs' },
 ]
 
 /** Unread count shown next to Notifications in the nav. */
@@ -90,7 +92,7 @@ export function Layout({
       </header>
 
       {/* One top nav on every screen size: sticky (not a fixed overlay), so nothing sits under it.
-          Nine items stay on one line; the bar scrolls sideways on narrow phones. */}
+          Ten items stay on one line; the bar scrolls sideways on narrow phones. */}
       <nav
         aria-label="Main"
         className="sticky top-0 z-40 flex items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-slate-800 bg-slate-900/95 px-3 py-2 backdrop-blur md:px-6"

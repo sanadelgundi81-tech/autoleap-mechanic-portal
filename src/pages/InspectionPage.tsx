@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import {
   completeInspection,
   fetchInspectionDetail,
+  fetchRepairOrder,
   reopenInspection,
   setInspectionResult,
   type InspectionDetail,
 } from '../lib/data'
 import { formatDate } from '../lib/format'
-import type { InspectionResultState, InspectionTemplateItem } from '../lib/types'
+import type { InspectionResultState, InspectionTemplateItem, RepairOrder } from '../lib/types'
 import {
   Card,
   EmptyState,
@@ -20,6 +21,13 @@ import {
   SecondaryButton,
 } from '../components/ui'
 import type { View } from '../components/Layout'
+
+// Only needed when Print report is clicked, so it loads on demand.
+const InspectionReportPrintView = lazy(() =>
+  import('../components/InspectionReportPrintView').then((m) => ({
+    default: m.InspectionReportPrintView,
+  })),
+)
 
 const STATE_BUTTONS: {
   state: InspectionResultState
@@ -67,6 +75,9 @@ export function InspectionPage({
   const [saving, setSaving] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [showReport, setShowReport] = useState(false)
+  const [reportOrder, setReportOrder] = useState<RepairOrder | null>(null)
+  const [openingReport, setOpeningReport] = useState(false)
 
   async function load() {
     try {
@@ -188,6 +199,22 @@ export function InspectionPage({
     }
   }
 
+  /** Loads the order (customer + vehicle for the report header), then opens the report. */
+  async function handleOpenReport() {
+    setError(null)
+    setOpeningReport(true)
+    try {
+      if (!reportOrder || reportOrder.id !== repairOrderId) {
+        setReportOrder(await fetchRepairOrder(repairOrderId))
+      }
+      setShowReport(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOpeningReport(false)
+    }
+  }
+
   if (loading) return <LoadingState message="Loading inspection…" />
   if (!detail) return <ErrorBanner message={error ?? 'Inspection not found.'} />
 
@@ -232,8 +259,11 @@ export function InspectionPage({
           state again to unmark an item. “Other” items take a free-text note.
         </p>
         {isComplete && (
-          <div className="mt-3 rounded-lg border border-teal-500/30 bg-teal-500/10 p-3 text-sm text-teal-300">
-            This inspection is complete. Reopen it to change any marking.
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-teal-500/30 bg-teal-500/10 p-3 text-sm text-teal-300">
+            <span>This inspection is complete. Reopen it to change any marking.</span>
+            <PrimaryButton onClick={() => void handleOpenReport()} disabled={openingReport}>
+              {openingReport ? 'Opening…' : 'Print report'}
+            </PrimaryButton>
           </div>
         )}
       </Card>
@@ -329,6 +359,16 @@ export function InspectionPage({
           </div>
         </Card>
       ))}
+
+      {showReport && isComplete && (
+        <Suspense fallback={null}>
+          <InspectionReportPrintView
+            detail={detail}
+            repairOrder={reportOrder}
+            onClose={() => setShowReport(false)}
+          />
+        </Suspense>
+      )}
 
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800 bg-slate-900 px-4 py-3">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">

@@ -187,6 +187,10 @@ export interface Timelog {
   /** Null while the timer is still running. */
   ended_at: string | null
   note: string | null
+  /** The service line the run was on; null = order-level run (not billed). */
+  repair_order_service_id: string | null
+  /** Rate that applied to a service run, frozen at stop time. Null for order-level runs. */
+  hourly_rate_cents: number | null
   created_at: string
   /** Joined for display by fetchTimelogs. */
   repair_orders?: {
@@ -465,4 +469,25 @@ export interface DashboardStats {
   openFindings: number
   attentionFindings: number
   failedFindings: number
+}
+
+/** A fastener torque value for a vehicle generation (reference only). */
+export interface TorqueSpec {
+  id: string
+  make: string
+  model: string
+  year_from: number
+  /** Null = to present. */
+  year_to: number | null
+  /** The job / fastener, e.g. "Wheel lug nut — Wheel bolts F30". */
+  job: string
+  /** As the source states it; null when the source gives only the other unit. */
+  torque_nm: number | null
+  /** Upper end of a stated range; null for a single value. */
+  torque_nm_max: number | null
+  torque_ftlb: number | null
+  torque_ftlb_max: number | null
+  /** Where the value comes from (a URL or a note such as "Owner's manual"). */
+  source: string
+  created_at: string
 }

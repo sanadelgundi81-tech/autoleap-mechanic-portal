@@ -1,5 +1,6 @@
 import { requireClient } from './supabase'
 import { formatAppointmentTime, money, timelogMinutes } from './format'
+import { minutesToBilledHours, rateForJob } from './laborRates'
 import type {
   AppNotification,
   Appointment,
@@ -31,6 +32,7 @@ import type {
   ServiceCounts,
   Timelog,
   Vehicle,
+  TorqueSpec,
 } from './types'
 import {
   APPOINTMENT_EDITABLE_STATUSES,
@@ -134,6 +136,14 @@ export async function fetchRepairOrders(): Promise<RepairOrder[]> {
     .order('created_at', { ascending: true })
   throwIfError(error, 'Failed to load orders')
   return (data ?? []) as RepairOrder[]
+}
+
+/** One order with customer and vehicle joined (no services, estimates, …). */
+export async function fetchRepairOrder(id: string): Promise<RepairOrder> {
+  const client = requireClient()
+  const { data, error } = await client.from('repair_orders').select(RO_SELECT).eq('id', id).single()
+  throwIfError(error, 'Failed to load order')
+  return data as RepairOrder
 }
 
 export async function fetchActiveRepairOrders(): Promise<RepairOrder[]> {
@@ -1039,10 +1049,13 @@ export async function fetchRecentPaidInvoices(limit = 20): Promise<PaidInvoiceRo
 }
 
 // ---------- Timelogs ----------
-// A RECORD of time worked on a repair order — not billing. Nothing here
-// writes labor_hours or any money total, and nothing here calls notify().
-// ended_at null = running; at most one running timelog per order (the
-// partial unique index is the database backstop).
+// Order-level runs (no service attached) are a RECORD of time worked — not
+// billing. A run on a service line (repair_order_service_id set) BILLS that
+// line when it stops: stopTimelog adds the time, rounded to 0.1 h, to the
+// service's labor_hours and sets its labor_rate to the job's rate
+// (laborRates.ts). The estimate/invoice math then picks it up as usual.
+// Nothing here calls notify(). ended_at null = running; at most one running
+// timelog per order (the partial unique index is the database backstop).
 
 const TIMELOG_SELECT = '*, repair_orders(id, ro_number, customers(id, name))'
 const UNIQUE_VIOLATION = '23505'
@@ -1087,8 +1100,15 @@ function cleanNote(note: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-/** Starts the order's timer (ended_at null). Only one may run per order. */
-export async function startTimelog(repairOrderId: string, note?: string | null): Promise<Timelog> {
+/**
+ * Starts the order's timer (ended_at null), on a service line when serviceId
+ * is given. Only one may run per order.
+ */
+export async function startTimelog(
+  repairOrderId: string,
+  note?: string | null,
+  serviceId: string | null = null,
+): Promise<Timelog> {
   const client = requireClient()
   const { data: running, error: runningError } = await client
     .from('timelogs')
@@ -1105,6 +1125,7 @@ export async function startTimelog(repairOrderId: string, note?: string | null):
       started_at: new Date().toISOString(),
       ended_at: null,
       note: cleanNote(note),
+      repair_order_service_id: serviceId,
     })
     .select('*')
     .single()
@@ -1114,7 +1135,11 @@ export async function startTimelog(repairOrderId: string, note?: string | null):
   return data as Timelog
 }
 
-/** Stops a running timelog (ended_at = now). Fails if already stopped. */
+/**
+ * Stops a running timelog (ended_at = now). Fails if already stopped.
+ * A run on a service line then bills it: labor_hours += elapsed time rounded
+ * to 0.1 h, labor_rate = the job's rate, and the rate is frozen on the run.
+ */
 export async function stopTimelog(id: string): Promise<void> {
   const client = requireClient()
   const { data, error } = await client
@@ -1122,11 +1147,41 @@ export async function stopTimelog(id: string): Promise<void> {
     .update({ ended_at: new Date().toISOString() })
     .eq('id', id)
     .is('ended_at', null)
-    .select('id')
+    .select('*')
   throwIfError(error, 'Failed to stop timelog')
   if (!data || data.length === 0) {
     throw new Error('That timelog is already stopped (or was deleted).')
   }
+  const stopped = data[0] as Timelog
+  if (stopped.repair_order_service_id) await billServiceRun(stopped)
+}
+
+async function billServiceRun(run: Timelog): Promise<void> {
+  const client = requireClient()
+  const { data: service, error: serviceError } = await client
+    .from('repair_order_services')
+    .select('id, name, labor_hours')
+    .eq('id', run.repair_order_service_id!)
+    .maybeSingle()
+  throwIfError(serviceError, 'Timer stopped, but failed to load its service')
+  // The service was deleted while the timer ran: the run stays as a record.
+  if (!service) return
+  const { name, labor_hours } = service as { id: string; name: string; labor_hours: number }
+  const rateCents = rateForJob(name)
+  const { error: rateError } = await client
+    .from('timelogs')
+    .update({ hourly_rate_cents: rateCents })
+    .eq('id', run.id)
+  throwIfError(rateError, 'Timer stopped, but failed to record its rate')
+  const added = minutesToBilledHours(timelogMinutes(run.started_at, run.ended_at))
+  const { error: updateError } = await client
+    .from('repair_order_services')
+    .update({
+      labor_hours: Math.round((Number(labor_hours) + added) * 100) / 100,
+      labor_rate: rateCents / 100,
+    })
+    .eq('id', service.id)
+  throwIfError(updateError, 'Timer stopped, but failed to add its time to the service')
 }
 
 /** Manual entry for time worked but not clocked. ended_at is required and must be after started_at. */
@@ -1918,4 +1973,135 @@ export function filterRepairGuides(guides: RepairGuide[], filter: RepairGuideFil
     }
     return true
   })
+}
+
+// ---------- Torque specs ----------
+// Reference values, seeded from free public charts (each row carries its
+// source) and grown by the shop. Never invent a value: a unit the source
+// does not state stays null.
+
+export interface TorqueSpecInput {
+  make: string
+  model: string
+  year_from: number | null
+  year_to: number | null
+  job: string
+  torque_nm: number | null
+  torque_nm_max: number | null
+  torque_ftlb: number | null
+  torque_ftlb_max: number | null
+  source: string
+}
+
+type TorqueSpecRow = Omit<TorqueSpec, 'id' | 'created_at'>
+
+/** Checks a torque row before it is saved; throws the reason shown on the form. */
+export function validateTorqueSpec(input: TorqueSpecInput, now: Date = new Date()): TorqueSpecRow {
+  const make = cleanText(input.make)
+  const model = cleanText(input.model)
+  const job = cleanText(input.job)
+  const source = cleanText(input.source)
+  if (!make) throw new Error('A make is required.')
+  if (!model) throw new Error('A model is required.')
+  if (!job) throw new Error('A job / fastener is required.')
+  if (!source) throw new Error('A source is required — where does this value come from?')
+  const maxYear = now.getFullYear() + 1
+  if (input.year_from === null) throw new Error('Year from is required.')
+  for (const [value, label] of [
+    [input.year_from, 'Year from'],
+    [input.year_to, 'Year to'],
+  ] as const) {
+    if (value === null) continue
+    if (!Number.isInteger(value)) throw new Error(`${label} must be a whole year, like 2018.`)
+    if (value < 1900 || value > maxYear) throw new Error(`${label} must be between 1900 and ${maxYear}.`)
+  }
+  if (input.year_to !== null && input.year_to < input.year_from) {
+    throw new Error('Year to cannot be before year from.')
+  }
+  for (const [value, label] of [
+    [input.torque_nm, 'Nm'],
+    [input.torque_nm_max, 'Nm (max)'],
+    [input.torque_ftlb, 'ft-lb'],
+    [input.torque_ftlb_max, 'ft-lb (max)'],
+  ] as const) {
+    if (value !== null && (!Number.isFinite(value) || value <= 0)) {
+      throw new Error(`${label} must be a number above 0.`)
+    }
+  }
+  if (input.torque_nm === null && input.torque_ftlb === null) {
+    throw new Error('Enter the torque in Nm, ft-lb, or both.')
+  }
+  if (input.torque_nm_max !== null && (input.torque_nm === null || input.torque_nm_max < input.torque_nm)) {
+    throw new Error('Nm (max) needs an Nm value and cannot be below it.')
+  }
+  if (
+    input.torque_ftlb_max !== null &&
+    (input.torque_ftlb === null || input.torque_ftlb_max < input.torque_ftlb)
+  ) {
+    throw new Error('ft-lb (max) needs an ft-lb value and cannot be below it.')
+  }
+  return {
+    make,
+    model,
+    year_from: input.year_from,
+    year_to: input.year_to,
+    job,
+    torque_nm: input.torque_nm,
+    torque_nm_max: input.torque_nm_max,
+    torque_ftlb: input.torque_ftlb,
+    torque_ftlb_max: input.torque_ftlb_max,
+    source,
+  }
+}
+
+/** Every torque row (paged past the 1000-row API limit), by make, model, newest generation. */
+export async function fetchTorqueSpecs(): Promise<TorqueSpec[]> {
+  const client = requireClient()
+  const page = 1000
+  const all: TorqueSpec[] = []
+  for (let from = 0; ; from += page) {
+    const { data, error } = await client
+      .from('torque_specs')
+      .select('*')
+      .order('make', { ascending: true })
+      .order('model', { ascending: true })
+      .order('year_from', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + page - 1)
+    throwIfError(error, 'Failed to load torque specs')
+    const rows = (data ?? []) as TorqueSpec[]
+    all.push(...rows)
+    if (rows.length < page) return all
+  }
+}
+
+export async function createTorqueSpec(input: TorqueSpecInput): Promise<TorqueSpec> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('torque_specs')
+    .insert(validateTorqueSpec(input))
+    .select('*')
+    .single()
+  throwIfError(error, 'Failed to add torque spec')
+  return data as TorqueSpec
+}
+
+export async function updateTorqueSpec(id: string, input: TorqueSpecInput): Promise<TorqueSpec> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('torque_specs')
+    .update(validateTorqueSpec(input))
+    .eq('id', id)
+    .select('*')
+    .maybeSingle()
+  throwIfError(error, 'Failed to update torque spec')
+  if (!data) throw new Error('That torque spec no longer exists.')
+  return data as TorqueSpec
+}
+
+export async function deleteTorqueSpec(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client.from('torque_specs').delete().eq('id', id).select('id')
+  throwIfError(error, 'Failed to delete torque spec')
+  if (!data || data.length === 0) throw new Error('That torque spec was already deleted.')
 }
