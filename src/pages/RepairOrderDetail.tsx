@@ -66,7 +66,31 @@ import {
   inputClassName,
 } from '../components/ui'
 import type { View } from '../components/Layout'
+import { rateLabel, rateLabelForCents } from '../lib/laborRates'
+
+/** Live stopwatch text: "4:05" or "1:02:09". */
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const sec = String(total % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`
+}
+
+/** Re-renders every second while `active`, for live timers. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [active])
+  return now
+}
 import { OverflowMenu } from '../components/OverflowMenu'
+import { VehicleRecalls, VinHistoryLinks } from '../components/VinTools'
+import { isValidVin } from '../lib/vin'
 
 // Only needed when Print is clicked, so it loads on demand (keeps the main chunk small).
 const InvoicePrintView = lazy(() =>
@@ -499,6 +523,15 @@ export function RepairOrderDetailPage({
             </div>
           </dl>
 
+          {vehicle?.vin && isValidVin(vehicle.vin) && (
+            <div className="mt-2">
+              <VinHistoryLinks vin={vehicle.vin} />
+            </div>
+          )}
+          {vehicle && (
+            <VehicleRecalls make={vehicle.make} model={vehicle.model} year={vehicle.year} />
+          )}
+
           <form onSubmit={handleSaveOdometer} className="mt-3 flex flex-wrap items-end gap-2">
             <div className="w-full sm:w-56">
               <Field label="Enter RO Odometer reading (km)">
@@ -765,6 +798,7 @@ function TimelogsCard({
   const { timelogs, totalMinutes } = detail.timelogs
   const running = timelogs.find((t) => t.ended_at === null) ?? null
   const now = Date.now()
+  const serviceNames = new Map(detail.services.map((s) => [s.id, s.name]))
 
   async function handleStartStop() {
     onError(null)
@@ -788,7 +822,8 @@ function TimelogsCard({
           <h3 className="text-base font-bold text-white">Timelogs</h3>
           <p className="text-xs text-slate-400">
             Total logged: <span className="font-semibold text-slate-200">{formatDuration(totalMinutes)}</span>
-            {running ? ' (includes the running timer)' : ''} · for reference, not billed
+            {running ? ' (includes the running timer)' : ''} · order-level runs are for
+            reference; runs on a service line are billed to that line
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -823,6 +858,16 @@ function TimelogsCard({
                 <p className="font-semibold text-slate-100">
                   {formatTimelogRange(t.started_at, t.ended_at)}
                 </p>
+                {t.repair_order_service_id && (
+                  <p className="text-xs text-slate-300">
+                    {serviceNames.get(t.repair_order_service_id) ?? 'Service (removed)'}
+                    {t.hourly_rate_cents !== null
+                      ? ` · ${rateLabelForCents(t.hourly_rate_cents)} · billed`
+                      : t.ended_at === null
+                        ? ' · running'
+                        : ''}
+                  </p>
+                )}
                 {t.note && <p className="text-xs text-slate-400">{t.note}</p>}
               </div>
               <span className="font-semibold text-white">
@@ -906,6 +951,8 @@ function ServicesSection({
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const done = services.filter((s) => s.is_done).length
+  const running = detail.timelogs.timelogs.find((t) => t.ended_at === null) ?? null
+  const now = useNow(running !== null)
   // Same numbers a new estimate prefills with (services, or the order-level
   // labour/parts fields when there are none) — no separate totals formula.
   const totals = estimatePrefill(detail)
@@ -960,6 +1007,18 @@ function ServicesSection({
   function handleDelete(service: OrderService) {
     if (!window.confirm(`Delete service "${service.name}"?`)) return
     void run(service.id, () => deleteOrderService(service.id))
+  }
+
+  /** Starts the job timer on this line, or stops it (stopping bills the line). */
+  function handleTimer(service: OrderService) {
+    if (running && running.repair_order_service_id === service.id) {
+      const id = running.id
+      void run(service.id, () => stopTimelog(id))
+    } else {
+      void run(service.id, async () => {
+        await startTimelog(repairOrderId, null, service.id)
+      })
+    }
   }
 
   return (
@@ -1040,6 +1099,39 @@ function ServicesSection({
                     </span>
                     <span>Parts {money(Number(service.parts_total))}</span>
                   </div>
+                  {(() => {
+                    const mine = running?.repair_order_service_id === service.id
+                    const blocked = running !== null && !mine
+                    return (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTimer(service)}
+                          disabled={busyId === service.id || blocked}
+                          title={
+                            blocked
+                              ? 'Another timer is running on this order. Stop it first.'
+                              : undefined
+                          }
+                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            mine
+                              ? 'bg-rose-600 text-white hover:bg-rose-500'
+                              : 'border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                          }`}
+                        >
+                          {mine ? '■ Stop' : '▶ Start'}
+                        </button>
+                        {mine && running ? (
+                          <span className="text-xs font-semibold text-emerald-300" aria-live="polite">
+                            {formatElapsed(now - new Date(running.started_at).getTime())} ·{' '}
+                            {rateLabel(service.name)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500">{rateLabel(service.name)}</span>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
                 <OverflowMenu
                   label={`Actions for ${service.name}`}

@@ -20,6 +20,8 @@ import {
   SecondaryButton,
 } from '../components/ui'
 import { OverflowMenu } from '../components/OverflowMenu'
+import { VehicleRecalls, VinHistoryLinks } from '../components/VinTools'
+import { isValidVin } from '../lib/vin'
 import {
   CustomerFormFields,
   EMPTY_CUSTOMER,
@@ -271,6 +273,12 @@ export function CustomerDetailPage({
                     <Row label="License plate">{v.license_plate ?? '—'}</Row>
                     <Row label="Mileage (KM)">{formatKm(v.mileage_km)}</Row>
                   </dl>
+                  {v.vin && isValidVin(v.vin) && (
+                    <div className="mt-2">
+                      <VinHistoryLinks vin={v.vin} />
+                    </div>
+                  )}
+                  <VehicleRecalls make={v.make} model={v.model} year={v.year} />
                 </div>
               ),
             )}

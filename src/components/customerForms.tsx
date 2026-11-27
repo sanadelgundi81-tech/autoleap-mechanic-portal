@@ -5,6 +5,8 @@
 import { vehicleLabel } from '../lib/format'
 import type { Customer, CustomerWithVehicles, Vehicle } from '../lib/types'
 import { Field, inputClassName } from './ui'
+import { VinField } from './VinTools'
+import type { DecodedVehicle } from '../lib/vin'
 
 export interface CustomerFormValues {
   name: string
@@ -139,8 +141,22 @@ export function VehicleFormFields({
   maxYear: number
 }) {
   const set = (key: keyof VehicleFormValues, value: string) => onChange({ ...values, [key]: value })
+  /** VIN lookup: fill only the fields NHTSA returned; everything else stays as typed. */
+  const applyDecoded = (decoded: DecodedVehicle, vin: string) => {
+    const next = { ...values, vin }
+    for (const key of ['year', 'make', 'model', 'trim', 'engine', 'transmission'] as const) {
+      const value = decoded[key]
+      if (value) next[key] = value
+    }
+    onChange(next)
+  }
   return (
     <>
+      <VinField
+        value={values.vin}
+        onChange={(vin) => onChange({ ...values, vin })}
+        onDecoded={applyDecoded}
+      />
       <Field label="Year">
         <input
           type="number"
@@ -192,13 +208,6 @@ export function VehicleFormFields({
           onChange={(e) => set('engine', e.target.value)}
           className={inputClassName}
           placeholder="3.5L Hybrid"
-        />
-      </Field>
-      <Field label="VIN">
-        <input
-          value={values.vin}
-          onChange={(e) => set('vin', e.target.value)}
-          className={inputClassName}
         />
       </Field>
       <Field label="License plate">
