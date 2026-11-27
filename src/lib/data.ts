@@ -26,6 +26,8 @@ import type {
   PaidInvoiceRow,
   RepairGuide,
   RepairGuideCategory,
+  RepairGuideLink,
+  RepairGuideLinkKind,
   RepairOrder,
   RepairOrderPriority,
   RepairOrderStatus,
@@ -40,6 +42,7 @@ import {
   ESTIMATE_STATUS_TRANSITIONS,
   INVOICE_STATUS_TRANSITIONS,
   REPAIR_GUIDE_CATEGORIES,
+  REPAIR_GUIDE_LINK_KINDS,
   REPAIR_ORDER_STATUS_LABELS,
 } from './types'
 
@@ -1943,6 +1946,108 @@ export function filterRepairGuides(guides: RepairGuide[], filter: RepairGuideFil
     }
     return true
   })
+}
+
+// ---------- Repair guide links ----------
+// Curated external resources (manuals, diagrams, recalls, videos, forums):
+// links only, never copied text. Each carries the site it points to.
+
+export interface RepairGuideLinkInput {
+  vehicle_make: string
+  vehicle_model: string
+  year_from: number | null
+  year_to: number | null
+  kind: RepairGuideLinkKind
+  title: string
+  url: string
+  source: string
+}
+
+type RepairGuideLinkRow = Omit<RepairGuideLink, 'id' | 'created_at'>
+
+/** Checks a link before it is saved; throws the reason shown on the form. */
+export function validateRepairGuideLink(input: RepairGuideLinkInput, now: Date = new Date()): RepairGuideLinkRow {
+  const make = cleanText(input.vehicle_make)
+  const model = cleanText(input.vehicle_model)
+  const title = cleanText(input.title)
+  const url = cleanText(input.url)
+  const source = cleanText(input.source)
+  if (!make) throw new Error('A make is required.')
+  if (!model) throw new Error('A model is required.')
+  if (!REPAIR_GUIDE_LINK_KINDS.includes(input.kind)) throw new Error('Pick what kind of link this is.')
+  if (!title) throw new Error('A title is required.')
+  if (!url) throw new Error('The link (URL) is required.')
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error('Enter the full link, starting with https://')
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Only web links (https://…) can be saved.')
+  }
+  if (/\s/.test(url)) throw new Error('The link cannot contain spaces.')
+  if (!source) throw new Error('Name the site the link points to (e.g. NHTSA, YouTube).')
+  const maxYear = now.getFullYear() + 1
+  for (const [value, label] of [
+    [input.year_from, 'Year from'],
+    [input.year_to, 'Year to'],
+  ] as const) {
+    if (value === null) continue
+    if (!Number.isInteger(value)) throw new Error(`${label} must be a whole year, like 2018.`)
+    if (value < 1900 || value > maxYear) throw new Error(`${label} must be between 1900 and ${maxYear}.`)
+  }
+  if (input.year_from !== null && input.year_to !== null && input.year_to < input.year_from) {
+    throw new Error('Year to cannot be before year from.')
+  }
+  return {
+    vehicle_make: make,
+    vehicle_model: model,
+    year_from: input.year_from,
+    year_to: input.year_to,
+    kind: input.kind,
+    title,
+    url,
+    source,
+  }
+}
+
+export async function fetchRepairGuideLinks(): Promise<RepairGuideLink[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('repair_guide_links')
+    .select('*')
+    .order('vehicle_make', { ascending: true })
+    .order('vehicle_model', { ascending: true })
+    .order('year_from', { ascending: true, nullsFirst: true })
+    .order('title', { ascending: true })
+  throwIfError(error, 'Failed to load repair guide links')
+  return (data ?? []) as RepairGuideLink[]
+}
+
+export async function createRepairGuideLink(input: RepairGuideLinkInput): Promise<RepairGuideLink> {
+  const row = validateRepairGuideLink(input)
+  const client = requireClient()
+  const { data, error } = await client.from('repair_guide_links').insert(row).select('*').single()
+  throwIfError(error, 'Failed to save link')
+  return data as RepairGuideLink
+}
+
+export async function updateRepairGuideLink(id: string, input: RepairGuideLinkInput): Promise<RepairGuideLink> {
+  const row = validateRepairGuideLink(input)
+  const client = requireClient()
+  const { data, error } = await client.from('repair_guide_links').update(row).eq('id', id).select('*')
+  throwIfError(error, 'Failed to update link')
+  if (!data || data.length === 0) throw new Error('That link no longer exists.')
+  return data[0] as RepairGuideLink
+}
+
+/** Deletes this one link only. */
+export async function deleteRepairGuideLink(id: string): Promise<void> {
+  const client = requireClient()
+  const { data, error } = await client.from('repair_guide_links').delete().eq('id', id).select('id')
+  throwIfError(error, 'Failed to delete link')
+  if (!data || data.length === 0) throw new Error('That link was already deleted.')
 }
 
 // ---------- Torque specs ----------

@@ -454,6 +454,38 @@ export interface RepairGuide {
   updated_at: string
 }
 
+/** What an external repair-guide link points at. */
+export type RepairGuideLinkKind = 'manual' | 'diagram' | 'bulletin' | 'video' | 'forum'
+
+export const REPAIR_GUIDE_LINK_KINDS: RepairGuideLinkKind[] = ['manual', 'diagram', 'bulletin', 'video', 'forum']
+
+export const REPAIR_GUIDE_LINK_KIND_LABELS: Record<RepairGuideLinkKind, string> = {
+  manual: "Owner's manual",
+  diagram: 'Parts diagram',
+  bulletin: 'Recall / bulletin',
+  video: 'Video',
+  forum: 'Forum',
+}
+
+/**
+ * A curated external resource about one vehicle — a link only, nothing copied.
+ * Mirrors supabase/migrations/20261127010000_prompt16_guide_links.sql.
+ */
+export interface RepairGuideLink {
+  id: string
+  vehicle_make: string
+  vehicle_model: string
+  year_from: number | null
+  /** Null = to present (or not set). */
+  year_to: number | null
+  kind: RepairGuideLinkKind
+  title: string
+  url: string
+  /** The site the link points to, e.g. "NHTSA (nhtsa.gov)". */
+  source: string
+  created_at: string
+}
+
 /** Service progress for one order: done services / total services. */
 export interface ServiceCounts {
   total: number
