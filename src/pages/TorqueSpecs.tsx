@@ -20,6 +20,7 @@ import {
 import { useDeleteWarning } from '../components/DeleteWarning'
 import { simpleWarning } from '../lib/deleteWarnings'
 import { OverflowMenu } from '../components/OverflowMenu'
+import { STUD_TORQUE_NOT_COVERED, STUD_TORQUE_RANGES, STUD_TORQUE_SOURCE } from '../lib/studTorque'
 
 export const TORQUE_NOTE =
   'Reference only — always verify against the vehicle’s service manual before torquing.'
@@ -366,7 +367,11 @@ export function TorqueSpecs() {
         <EmptyState message="No torque specs yet. Use Add torque spec to add the first one." />
       ) : filtered.length === 0 ? (
         <EmptyState
-          message={anyFilter ? 'No specs match this search.' : 'No torque specs yet.'}
+          message={
+            anyFilter
+              ? 'No spec for this vehicle in the table. The stud-size range below is a fallback, not a vehicle spec.'
+              : 'No torque specs yet.'
+          }
         />
       ) : (
         <div className="space-y-2">
@@ -401,7 +406,59 @@ export function TorqueSpecs() {
           )}
         </div>
       )}
+
+      <StudFallback open={Boolean(anyFilter) && filtered.length === 0} />
     </div>
+  )
+}
+
+/**
+ * calibr.pro ranges by stud thread, for when no per-vehicle row exists.
+ * Shown separately from the specs and labelled as a range — never a vehicle's spec.
+ */
+function StudFallback({ open }: { open: boolean }) {
+  const [thread, setThread] = useState('')
+  const row = STUD_TORQUE_RANGES.find((r) => r.thread === thread) ?? null
+  return (
+    <details open={open || undefined} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-sm font-semibold text-slate-200">
+        No row for the vehicle? Safe range by stud size
+      </summary>
+      <div className="mt-3 flex flex-col gap-3">
+        <p className="text-sm text-slate-300">
+          A wheel/stud makers&rsquo; range by thread size — <strong>not the vehicle&rsquo;s spec</strong>. Use the
+          vehicle&rsquo;s own figure whenever you have it. Not covered: {STUD_TORQUE_NOT_COVERED}.
+        </p>
+        <Field label="Stud thread">
+          <select value={thread} onChange={(e) => setThread(e.target.value)} className={inputClassName}>
+            <option value="">Pick a stud size</option>
+            {STUD_TORQUE_RANGES.map((r) => (
+              <option key={r.thread} value={r.thread}>
+                {r.thread} — {r.vehicle}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {row && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">Range — not a vehicle spec</p>
+            <p className="mt-1 text-base font-bold text-white">
+              {row.nmFrom}–{row.nmTo} Nm · {row.ftlbFrom}–{row.ftlbTo} ft-lb
+            </p>
+            <p className="text-sm text-slate-300">
+              {row.thread} · {row.vehicle} · {row.mounting}
+            </p>
+          </div>
+        )}
+        <p className="break-all text-xs text-slate-400">
+          Source:{' '}
+          <a href={STUD_TORQUE_SOURCE} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">
+            calibr.pro wheel torque chart
+          </a>{' '}
+          (dry, clean, undamaged studs; final torque by torque wrench).
+        </p>
+      </div>
+    </details>
   )
 }
 
